@@ -1,0 +1,16 @@
+Limen
+Copyright 2026 RowKeyDB
+
+This product is licensed under the Apache License, Version 2.0 (see the
+LICENSE file).
+
+This product is a C++20 port of, and derived work from, Netflix's
+concurrency-limits library:
+
+  https://github.com/Netflix/concurrency-limits
+  Copyright 2018 Netflix, Inc.
+  Licensed under the Apache License, Version 2.0.
+
+Ported source files retain the original Netflix copyright notice in
+addition to RowKeyDB's notice, per the Apache 2.0 license's requirement
+that derivative works preserve the original copyright and attribution.

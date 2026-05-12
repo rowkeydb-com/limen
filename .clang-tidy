@@ -1,0 +1,138 @@
+---
+# clang-tidy configuration for Limen.
+#
+# Most checks from the "abseil", "bugprone", "google", "misc",
+# "modernize", "performance", "portability", and "readability"
+# categories are enabled. A small set of checks is explicitly
+# disabled below where the check is noisy in practice, conflicts
+# with idiomatic C++20 + Google Style, or duplicates work the
+# style guide already mandates.
+#
+# Rationale for the most notable disables:
+#
+#   -modernize-use-trailing-return-type
+#       The check prefers `auto F() -> T { ... }` even where the
+#       conventional form is clearer.
+#
+#   -modernize-return-braced-init-list
+#       Dropping the type name in a return statement can hurt
+#       readability when the return type is non-obvious.
+#
+#   -modernize-avoid-c-arrays
+#       `char foo[] = "hello"` is idiomatic and `std::array` is
+#       not a drop-in replacement (the size is not deduced).
+#
+#   -performance-move-const-arg
+#       Triggers on `std::move(x)` even when `x` is trivial or the
+#       callee takes by `const&`. Requires the caller to know
+#       implementation details of the callee, which is the wrong
+#       direction.
+#
+#   -performance-avoid-endl
+#       Legitimate uses exist in examples and tests.
+#
+#   -readability-redundant-declaration
+#       A friend declaration inside a class plus a normal
+#       declaration outside is a useful pattern for documenting
+#       the public API.
+#
+#   -readability-function-cognitive-complexity
+#       Too many false positives, especially around macros.
+#
+#   -readability-identifier-length, -readability-magic-numbers,
+#   -readability-named-parameter
+#       Noisy for typical numeric constants and short loop
+#       indices; the rest of the readability suite covers what
+#       matters here.
+#
+#   -bugprone-narrowing-conversions
+#       Too many false positives around `std::size_t` versus
+#       `*::difference_type`.
+#
+#   -bugprone-easily-swappable-parameters
+#       Too many false positives.
+#
+#   -bugprone-implicit-widening-of-multiplication-result
+#       Triggers on any `2 * variable` expression.
+#
+#   -bugprone-unchecked-optional-access
+#       Triggers after `ASSERT_TRUE(opt.has_value())` and
+#       similar guarded paths.
+#
+#   -modernize-use-std-format
+#       Reserved for a deliberate `absl::StrFormat` ->
+#       `std::format` migration in its own change.
+
+Checks: >
+  -*,
+  abseil-*,
+  bugprone-*,
+  google-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -google-readability-braces-around-statements,
+  -google-readability-namespace-comments,
+  -misc-non-private-member-variables-in-classes,
+  -misc-const-correctness,
+  -modernize-deprecated-headers,
+  -modernize-return-braced-init-list,
+  -modernize-use-trailing-return-type,
+  -modernize-avoid-c-arrays,
+  -readability-braces-around-statements,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-named-parameter,
+  -readability-redundant-declaration,
+  -readability-avoid-return-with-void-value,
+  -readability-function-cognitive-complexity,
+  -performance-move-const-arg,
+  -performance-avoid-endl,
+  -performance-enum-size,
+  -bugprone-narrowing-conversions,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-inc-dec-in-conditions,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-unchecked-optional-access,
+  -bugprone-unused-local-non-trivial-variable,
+  -bugprone-unused-return-value,
+  -modernize-use-std-format,
+  -portability-template-virtual-member-function
+
+# Treat all enabled warnings as errors.
+WarningsAsErrors: "*"
+
+# Apply checks to all headers in the project's source tree.
+HeaderFilterRegex: ".*\\.h$"
+
+CheckOptions:
+  - { key: readability-identifier-naming.NamespaceCase,           value: lower_case }
+  - { key: readability-identifier-naming.ClassCase,               value: CamelCase  }
+  - { key: readability-identifier-naming.StructCase,              value: CamelCase  }
+  - { key: readability-identifier-naming.TemplateParameterCase,   value: CamelCase  }
+  - { key: readability-identifier-naming.FunctionCase,            value: aNy_CasE   }
+  - { key: readability-identifier-naming.VariableCase,            value: lower_case }
+  - { key: readability-identifier-naming.ClassMemberCase,         value: lower_case }
+  - { key: readability-identifier-naming.ClassMemberSuffix,       value: _          }
+  - { key: readability-identifier-naming.PrivateMemberSuffix,     value: _          }
+  - { key: readability-identifier-naming.ProtectedMemberSuffix,   value: _          }
+  - { key: readability-identifier-naming.EnumConstantCase,        value: CamelCase  }
+  - { key: readability-identifier-naming.EnumConstantPrefix,      value: k          }
+  - { key: readability-identifier-naming.ConstexprVariableCase,   value: CamelCase  }
+  - { key: readability-identifier-naming.ConstexprVariablePrefix, value: k          }
+  - { key: readability-identifier-naming.GlobalConstantCase,      value: CamelCase  }
+  - { key: readability-identifier-naming.GlobalConstantPrefix,    value: k          }
+  - { key: readability-identifier-naming.ClassConstantCase,       value: CamelCase  }
+  - { key: readability-identifier-naming.ClassConstantPrefix,     value: k          }
+  - { key: readability-identifier-naming.StaticConstantCase,      value: CamelCase  }
+  - { key: readability-identifier-naming.StaticConstantPrefix,    value: k          }
+  - { key: readability-implicit-bool-conversion.AllowIntegerConditions, value: 1    }
+  - { key: readability-implicit-bool-conversion.AllowPointerConditions, value: 1    }
+  - { key: readability-function-cognitive-complexity.IgnoreMacros,      value: 1    }
+  # Suppress include-cleaner suggestions naming libstdc++ internal headers
+  # (bits/chrono.h, bits/types/*.h). User code should include the public
+  # umbrella header (<chrono>, etc.); the include-cleaner's preprocessor
+  # view of these is not portable.
+  - { key: misc-include-cleaner.IgnoreHeaders, value: "bits/.*" }

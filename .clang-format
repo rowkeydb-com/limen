@@ -1,0 +1,36 @@
+# clang-format configuration for Limen.
+#
+# We follow the Google C++ Style Guide as the base. The few overrides
+# below are deliberate project conventions.
+
+BasedOnStyle: Google
+
+# Pointer alignment: prefer "int& foo" over "int &foo". The style guide
+# only asks for consistency within a project; we choose left-aligned.
+DerivePointerAlignment: false
+PointerAlignment: Left
+
+# "East const": write "int const&" rather than "const int&". Again, the
+# style guide only asks for consistency; we choose east.
+QualifierAlignment: Right
+
+# Sort and merge #include blocks.
+IncludeBlocks: Merge
+
+IncludeCategories:
+  # Project headers come first.
+  - Regex: '^"limen/'
+    Priority: 1
+  # Other quoted includes (rare; would be unusual third-party).
+  - Regex: '^"'
+    Priority: 2
+  # Library headers via <> with a path component
+  # (abseil, opentelemetry, grpc, etc.).
+  - Regex: '^<.*/.*'
+    Priority: 3
+  # C++ standard library headers like <vector>, <string>.
+  - Regex: '^<[a-z_]+>$'
+    Priority: 4
+  # C-style system headers like <unistd.h>, <sys/socket.h>.
+  - Regex: '^<[A-Za-z0-9_/]*\.h>$'
+    Priority: 5
