@@ -1,0 +1,20 @@
+"""Limen — an idiomatic C++20 port of Netflix's concurrency-limits.
+
+See design/architecture.md for the full library overview.
+"""
+
+module(
+    name = "limen",
+    version = "0.0.0-dev",
+    compatibility_level = 1,
+)
+
+# Latest stable as of v0.1.0 work landing. The "Dependency versions"
+# section of ai/commit-plan.md explains why we pin latest stable.
+bazel_dep(name = "abseil-cpp", version = "20260107.1")
+bazel_dep(name = "opentelemetry-cpp", version = "1.24.0.bcr.1")
+bazel_dep(name = "grpc", version = "1.80.0")
+bazel_dep(name = "rules_cc", version = "0.2.18")
+
+# Test-only dependency. GoogleTest is not visible to consumers.
+bazel_dep(name = "googletest", version = "1.17.0.bcr.2", dev_dependency = True)

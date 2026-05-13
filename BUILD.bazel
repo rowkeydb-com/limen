@@ -1,0 +1,8 @@
+# Top-level Bazel package for Limen.
+#
+# Library targets land in subsequent commits per ai/commit-plan.md.
+# This file is a placeholder for now so that `bazel build //...`
+# and `bazel test //...` resolve cleanly on an otherwise empty
+# tree.
+
+package(default_visibility = ["//visibility:public"])

@@ -1,0 +1,9 @@
+# Directories Bazel must not traverse when expanding `//...`.
+# These are caches and IDE outputs that may live inside the workspace.
+
+.cache/
+.build/
+_build/
+build/
+build-out/
+build-output/

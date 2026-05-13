@@ -1,0 +1,44 @@
+name: Sanitizers
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  sanitizers:
+    name: ${{ matrix.config }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [asan-ubsan, tsan]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build CI Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/Dockerfile.ci
+          tags: limen-ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build
+        run: .github/scripts/run-bazel-in-docker.sh ${{ matrix.config }} build
+
+      - name: Test
+        run: .github/scripts/run-bazel-in-docker.sh ${{ matrix.config }} test

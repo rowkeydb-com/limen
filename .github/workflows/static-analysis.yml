@@ -1,0 +1,68 @@
+name: Static Analysis
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  static-analysis:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build CI Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/Dockerfile.ci
+          tags: limen-ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build under clang-tidy config (placeholder)
+        # Commit 1 does not have the clang-tidy aspect wired into the
+        # build. This step compiles with `--config=clang-tidy`, which
+        # currently resolves to `--config=clang` (thread-safety
+        # enforcement). The aspect that runs clang-tidy itself is
+        # added when the first library target lands, at which point
+        # this step starts performing real static analysis without
+        # any workflow change.
+        run: .github/scripts/run-bazel-in-docker.sh clang-tidy build
+
+      - name: clang-format check
+        run: |
+          docker run --rm -v "$PWD":/workspace --user "$(id -u):$(id -g)" \
+            -w /workspace limen-ci bash -c '
+              find . \( -name "*.cc" -o -name "*.h" \) \
+                  -not -path "*/external/*" \
+                  -not -path "*/bazel-*/*" \
+                  -not -path "*/.cache/*" \
+                  -print0 \
+                | xargs -0 -r clang-format --dry-run --Werror
+            '
+
+      - name: shellcheck
+        run: |
+          docker run --rm -v "$PWD":/workspace --user "$(id -u):$(id -g)" \
+            -w /workspace limen-ci bash -c '
+              find .github/scripts -name "*.sh" -print0 | xargs -0 -r shellcheck
+            '
+
+      - name: actionlint
+        uses: reviewdog/action-actionlint@v1
+        with:
+          fail_level: error

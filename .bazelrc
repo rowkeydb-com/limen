@@ -1,0 +1,71 @@
+# Limen Bazel configuration.
+#
+# Common build flags are below. Sanitizer and static-analysis
+# configurations are layered on top with `--config=<name>`.
+
+# C++20 across the project.
+build --cxxopt=-std=c++20 --host_cxxopt=-std=c++20
+
+# No exceptions, no RTTI, per Google C++ Style Guide.
+build --cxxopt=-fno-exceptions --host_cxxopt=-fno-exceptions
+build --cxxopt=-fno-rtti --host_cxxopt=-fno-rtti
+
+# Warning hygiene.
+build --cxxopt=-Wall --host_cxxopt=-Wall
+build --cxxopt=-Wextra --host_cxxopt=-Wextra
+build --cxxopt=-Werror --host_cxxopt=-Werror
+
+# Print full output (including sanitizer reports and clang-tidy
+# findings) for failed actions, not just a truncated summary.
+build --verbose_failures
+test --test_output=errors
+
+# `--config=clang` enables Clang's thread-safety annotation
+# enforcement. Chained from sanitizer configs below so every
+# sanitizer build also enforces the annotations.
+build:clang --cxxopt=-Wthread-safety --host_cxxopt=-Wthread-safety
+build:clang --cxxopt=-Werror=thread-safety --host_cxxopt=-Werror=thread-safety
+
+# Release build: optimised, no debug assertions.
+build:release --compilation_mode=opt
+build:release --config=clang
+
+# AddressSanitizer + UndefinedBehaviorSanitizer.
+build:asan-ubsan --config=clang
+build:asan-ubsan --copt=-fsanitize=address,undefined
+build:asan-ubsan --copt=-fno-omit-frame-pointer
+build:asan-ubsan --copt=-O1
+build:asan-ubsan --linkopt=-fsanitize=address,undefined
+build:asan-ubsan --strip=never
+
+# ThreadSanitizer.
+build:tsan --config=clang
+build:tsan --copt=-fsanitize=thread
+build:tsan --copt=-fno-omit-frame-pointer
+build:tsan --copt=-O1
+build:tsan --linkopt=-fsanitize=thread
+build:tsan --strip=never
+
+# clang-tidy via the upstream Bazel integration (aspect-based).
+# Note: the actual aspect wiring is added when limen's first
+# library target lands; for now this config is a placeholder
+# that ensures the `--config=clang-tidy` switch is recognised.
+build:clang-tidy --config=clang
+
+# Coverage with lcov.
+coverage --config=clang
+coverage --combined_report=lcov
+
+# Remote-cache scaffolding. The cache is off by default. To turn it
+# on for a developer machine or a CI environment, set the URL via a
+# local .bazelrc.user (loaded below) or pass --config=remote-cache on
+# the command line, with the URL configured via --remote_cache=...
+# either inline or in the user file.
+build:remote-cache --remote_cache_compression=true
+# build:remote-cache --remote_cache=https://example.invalid/cache
+# build:remote-cache --remote_upload_local_results=true
+
+# Try the user-local bazelrc if it exists. Not committed. Use this to
+# set credentials, point at a personal remote cache, or override any
+# of the configs above without touching the committed file.
+try-import %workspace%/.bazelrc.user

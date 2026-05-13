@@ -1,0 +1,74 @@
+name: Code Coverage
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build CI Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/Dockerfile.ci
+          tags: limen-ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate coverage report
+        # The script runs `bazel coverage` inside the CI container and
+        # places the resulting lcov at ./coverage.lcov. If no test
+        # targets exist yet, an empty coverage.lcov is produced.
+        run: .github/scripts/run-bazel-in-docker.sh coverage coverage
+
+      - name: Generate HTML report
+        if: ${{ hashFiles('coverage.lcov') != '' }}
+        run: |
+          if [ -s coverage.lcov ]; then
+            docker run --rm \
+              -v "$PWD":/workspace \
+              --user "$(id -u):$(id -g)" \
+              -w /workspace limen-ci \
+              genhtml coverage.lcov -o coverage_html \
+                --ignore-errors source,negative \
+                --legend \
+                --title "Limen Coverage"
+          else
+            echo "Empty coverage.lcov; skipping HTML generation."
+          fi
+
+      - name: Upload to Codecov
+        if: ${{ hashFiles('coverage.lcov') != '' }}
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.lcov
+          flags: unittests
+          name: limen-coverage
+          fail_ci_if_error: false
+
+      - name: Upload HTML report
+        if: ${{ hashFiles('coverage_html/**') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage_html/
+          retention-days: 30
