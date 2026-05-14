@@ -14,8 +14,9 @@
 // permissions and limitations under the License.
 
 #include "limen/simple_limiter.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include <atomic>
-#include <cassert>
 #include <memory>
 #include <optional>
 #include <string_view>
@@ -23,8 +24,11 @@
 
 namespace limen {
 
-std::unique_ptr<SimpleLimiter> SimpleLimiter::Builder::Build() {
-  assert(limit_ != nullptr && "SimpleLimiter::Builder::Limit() is required");
+absl::StatusOr<std::unique_ptr<SimpleLimiter>> SimpleLimiter::Builder::Build() {
+  if (limit_ == nullptr) {
+    return absl::InvalidArgumentError(
+        "SimpleLimiter::Builder::Limit() is required");
+  }
   AbstractLimiter::Params params{std::move(limit_), std::move(id_),
                                  std::move(bypass_predicate_),
                                  std::move(meter_provider_)};
@@ -34,7 +38,8 @@ std::unique_ptr<SimpleLimiter> SimpleLimiter::Builder::Build() {
 SimpleLimiter::SimpleLimiter(PrivateTag, AbstractLimiter::Params params)
     : AbstractLimiter(std::move(params)) {}
 
-std::optional<int> SimpleLimiter::DoAcquire(std::string_view /*context*/) {
+std::optional<AbstractLimiter::AcquireResult> SimpleLimiter::DoAcquire(
+    std::string_view /*context*/) {
   // Compare-and-swap loop on the in-flight atomic against the cap.
   // The cap is re-read on every iteration because it can change
   // mid-acquire (a cap reduction from `SettableLimit::SetLimit` or
@@ -50,7 +55,7 @@ std::optional<int> SimpleLimiter::DoAcquire(std::string_view /*context*/) {
     if (inflight_.compare_exchange_weak(current, current + 1,
                                         std::memory_order_relaxed,
                                         std::memory_order_relaxed)) {
-      return current + 1;
+      return AcquireResult{current + 1, /*partition_index=*/-1};
     }
     // The CAS updated `current` to the live value; the loop
     // re-checks against the (possibly also updated) cap.

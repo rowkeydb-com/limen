@@ -18,6 +18,7 @@
 
 #include "limen/limit.h"
 #include "limen/sample_window.h"
+#include "absl/status/statusor.h"
 #include "absl/synchronization/mutex.h"
 #include <array>
 #include <atomic>
@@ -101,7 +102,13 @@ class WindowedLimit final : public Limit {
     }
 
     // Builds the limiter and transfers ownership of the delegate.
-    std::unique_ptr<WindowedLimit> Build(std::unique_ptr<Limit> delegate);
+    // Returns `InvalidArgumentError` when the accumulated
+    // configuration is broken (non-positive window times, inverted
+    // min/max, sample count below one, negative RTT threshold). A
+    // library never crashes the host process on bad input; the
+    // application picks the response.
+    absl::StatusOr<std::unique_ptr<WindowedLimit>> Build(
+        std::unique_ptr<Limit> delegate);
 
    private:
     int64_t min_window_time_ns_ = 1'000'000'000;

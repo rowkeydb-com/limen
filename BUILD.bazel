@@ -11,6 +11,7 @@ cc_library(
     srcs = [
         "src/abstract_limit.cc",
         "src/abstract_limiter.cc",
+        "src/abstract_partitioned_limiter.cc",
         "src/average_sample_window.cc",
         "src/exp_avg_measurement.cc",
         "src/gradient2_limit.cc",
@@ -22,6 +23,7 @@ cc_library(
     hdrs = [
         "include/limen/abstract_limit.h",
         "include/limen/abstract_limiter.h",
+        "include/limen/abstract_partitioned_limiter.h",
         "include/limen/average_sample_window.h",
         "include/limen/exp_avg_measurement.h",
         "include/limen/fixed_limit.h",
@@ -30,6 +32,7 @@ cc_library(
         "include/limen/limiter.h",
         "include/limen/measurement.h",
         "include/limen/minimum_measurement.h",
+        "include/limen/partition.h",
         "include/limen/percentile_sample_window.h",
         "include/limen/sample_window.h",
         "include/limen/settable_limit.h",
@@ -41,6 +44,9 @@ cc_library(
     strip_include_prefix = "include",
     deps = [
         "@abseil-cpp//absl/base:core_headers",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/strings",
         "@abseil-cpp//absl/synchronization",
         "@opentelemetry-cpp//api",
         "@opentelemetry-cpp//sdk/src/metrics",
@@ -154,5 +160,15 @@ cc_test(
     deps = [
         ":limen",
         "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "abstract_partitioned_limiter_test",
+    srcs = ["test/abstract_partitioned_limiter_test.cc"],
+    deps = [
+        ":limen",
+        "@googletest//:gtest_main",
+        "@opentelemetry-cpp//sdk/src/metrics",
     ],
 )

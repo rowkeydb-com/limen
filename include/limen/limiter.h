@@ -34,7 +34,8 @@ namespace limen {
 //
 // `SlotGuard` is move-only and stores its per-call state inline:
 // a back-pointer to the limiter, the start timestamp, the in-flight
-// count at admission, a bypassed flag, and a completion-flag. The
+// count at admission, a bypassed flag, a completion-flag, and an
+// optional partition index (-1 for non-partitioned limiters). The
 // per-request path performs no heap allocation: TryAcquire returns
 // the SlotGuard by value through `std::optional`, and the SlotGuard
 // lives on the caller's stack until the work completes.
@@ -75,8 +76,11 @@ class Limiter {
   // destructor default). Implementations decrement the in-flight
   // counter, increment the appropriate outcome counter, and feed
   // a sample to the wrapped algorithm where appropriate.
+  // `partition_index` is -1 for non-partitioned limiters and the
+  // resolved partition slot for AbstractPartitionedLimiter.
   virtual void OnSlotComplete(CompletionStatus status, int64_t start_time_ns,
-                              int inflight_at_acquire, bool bypassed) = 0;
+                              int inflight_at_acquire, bool bypassed,
+                              int partition_index) = 0;
 
   // Factory used by Limiter implementations to construct a
   // SlotGuard. The SlotGuard's constructor is private and only
@@ -84,8 +88,12 @@ class Limiter {
   // static factory keeps the access-control surface small (one
   // friend declaration on SlotGuard, no per-subclass friending)
   // and gives every derived class a single, named entry point.
+  // `partition_index` defaults to -1; AbstractPartitionedLimiter
+  // passes the resolved partition slot so SlotGuard's destructor
+  // can route the release to the right partition counter.
   static SlotGuard MakeSlot(Limiter* limiter, int64_t start_time_ns,
-                            int inflight_at_acquire, bool bypassed);
+                            int inflight_at_acquire, bool bypassed,
+                            int partition_index = -1);
 };
 
 // Move-only RAII guard returned by TryAcquire on admission.
@@ -94,7 +102,8 @@ class Limiter::SlotGuard {
   ~SlotGuard() {
     if (limiter_ != nullptr && !completed_) {
       limiter_->OnSlotComplete(CompletionStatus::kIgnored, start_time_ns_,
-                               inflight_at_acquire_, bypassed_);
+                               inflight_at_acquire_, bypassed_,
+                               partition_index_);
     }
   }
 
@@ -105,6 +114,7 @@ class Limiter::SlotGuard {
       : limiter_(other.limiter_),
         start_time_ns_(other.start_time_ns_),
         inflight_at_acquire_(other.inflight_at_acquire_),
+        partition_index_(other.partition_index_),
         bypassed_(other.bypassed_),
         completed_(other.completed_) {
     other.limiter_ = nullptr;
@@ -114,11 +124,13 @@ class Limiter::SlotGuard {
     if (this != &other) {
       if (limiter_ != nullptr && !completed_) {
         limiter_->OnSlotComplete(CompletionStatus::kIgnored, start_time_ns_,
-                                 inflight_at_acquire_, bypassed_);
+                                 inflight_at_acquire_, bypassed_,
+                                 partition_index_);
       }
       limiter_ = other.limiter_;
       start_time_ns_ = other.start_time_ns_;
       inflight_at_acquire_ = other.inflight_at_acquire_;
+      partition_index_ = other.partition_index_;
       bypassed_ = other.bypassed_;
       completed_ = other.completed_;
       other.limiter_ = nullptr;
@@ -147,10 +159,11 @@ class Limiter::SlotGuard {
   friend class Limiter;
 
   SlotGuard(Limiter* limiter, int64_t start_time_ns, int inflight_at_acquire,
-            bool bypassed)
+            bool bypassed, int partition_index)
       : limiter_(limiter),
         start_time_ns_(start_time_ns),
         inflight_at_acquire_(inflight_at_acquire),
+        partition_index_(partition_index),
         bypassed_(bypassed),
         completed_(false) {}
 
@@ -159,13 +172,14 @@ class Limiter::SlotGuard {
       return;
     }
     limiter_->OnSlotComplete(status, start_time_ns_, inflight_at_acquire_,
-                             bypassed_);
+                             bypassed_, partition_index_);
     completed_ = true;
   }
 
   Limiter* limiter_;
   int64_t start_time_ns_;
   int inflight_at_acquire_;
+  int partition_index_;
   bool bypassed_;
   bool completed_;
 };
@@ -173,8 +187,10 @@ class Limiter::SlotGuard {
 inline Limiter::SlotGuard Limiter::MakeSlot(Limiter* limiter,
                                             int64_t start_time_ns,
                                             int inflight_at_acquire,
-                                            bool bypassed) {
-  return SlotGuard{limiter, start_time_ns, inflight_at_acquire, bypassed};
+                                            bool bypassed,
+                                            int partition_index) {
+  return SlotGuard{limiter, start_time_ns, inflight_at_acquire, bypassed,
+                   partition_index};
 }
 
 }  // namespace limen

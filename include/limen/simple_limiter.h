@@ -18,6 +18,7 @@
 
 #include "limen/abstract_limiter.h"
 #include "limen/limit.h"
+#include "absl/status/statusor.h"
 #include "opentelemetry/sdk/metrics/meter_provider.h"
 #include <memory>
 #include <optional>
@@ -75,7 +76,13 @@ class SimpleLimiter final : public AbstractLimiter {
       return *this;
     }
 
-    std::unique_ptr<SimpleLimiter> Build();
+    // Validates the accumulated configuration and constructs the
+    // limiter. Returns `InvalidArgumentError` when the caller did
+    // not supply a `Limit()`. A library never crashes the host
+    // process on bad input; the application picks the response
+    // (log and abort, fall back to a default, fail-the-startup
+    // health check, etc.).
+    absl::StatusOr<std::unique_ptr<SimpleLimiter>> Build();
 
    private:
     std::unique_ptr<limen::Limit> limit_;
@@ -85,7 +92,7 @@ class SimpleLimiter final : public AbstractLimiter {
   };
 
  protected:
-  std::optional<int> DoAcquire(std::string_view context) override;
+  std::optional<AcquireResult> DoAcquire(std::string_view context) override;
 
  private:
   // Construction goes through the inner Builder. The PrivateTag is

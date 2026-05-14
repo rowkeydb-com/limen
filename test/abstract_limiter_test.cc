@@ -112,7 +112,8 @@ class RejectingLimiter : public AbstractLimiter {
   }
 
  protected:
-  std::optional<int> DoAcquire(std::string_view /*context*/) override {
+  std::optional<AcquireResult> DoAcquire(
+      std::string_view /*context*/) override {
     return std::nullopt;
   }
 

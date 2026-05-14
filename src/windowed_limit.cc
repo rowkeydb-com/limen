@@ -15,9 +15,10 @@
 
 #include "limen/windowed_limit.h"
 #include "limen/average_sample_window.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/synchronization/mutex.h"
 #include <algorithm>
-#include <cassert>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -25,25 +26,38 @@
 
 namespace limen {
 
-std::unique_ptr<WindowedLimit> WindowedLimit::Builder::Build(
+absl::StatusOr<std::unique_ptr<WindowedLimit>> WindowedLimit::Builder::Build(
     std::unique_ptr<Limit> delegate) {
-  // These asserts catch obviously-broken configurations. Upstream
-  // Java enforces additional minimums (>= 100 ms window time, >= 10
-  // sample window) via runtime exceptions; Limen omits those because
-  // (1) `-fno-exceptions` rules out the upstream mechanism, and (2)
-  // sub-millisecond windows are useful in tests. Operators should
-  // still follow the upstream guidance for production deployments;
-  // the recommended ranges are documented on each setter above.
-  assert(min_window_time_ns_ > 0 &&
-         "WindowedLimit::Builder::MinWindowTimeNs must be positive");
-  assert(max_window_time_ns_ > 0 &&
-         "WindowedLimit::Builder::MaxWindowTimeNs must be positive");
-  assert(min_window_time_ns_ <= max_window_time_ns_ &&
-         "MinWindowTimeNs must not exceed MaxWindowTimeNs");
-  assert(window_size_ >= 1 &&
-         "WindowedLimit::Builder::WindowSize must be at least 1");
-  assert(min_rtt_threshold_ns_ >= 0 &&
-         "WindowedLimit::Builder::MinRttThresholdNs must be non-negative");
+  // Validate the accumulated configuration. Upstream Java enforces
+  // additional minimums (>= 100 ms window time, >= 10 sample
+  // window) via runtime exceptions; Limen does not, because
+  // (1) `-fno-exceptions` rules out the upstream mechanism, and
+  // (2) sub-millisecond windows are useful in tests. Operators
+  // should still follow the upstream guidance for production
+  // deployments; the recommended ranges are documented on each
+  // setter above. A library does not crash the host process on
+  // bad input — the application picks the response.
+  if (min_window_time_ns_ <= 0) {
+    return absl::InvalidArgumentError(
+        "WindowedLimit::Builder::MinWindowTimeNs must be positive");
+  }
+  if (max_window_time_ns_ <= 0) {
+    return absl::InvalidArgumentError(
+        "WindowedLimit::Builder::MaxWindowTimeNs must be positive");
+  }
+  if (min_window_time_ns_ > max_window_time_ns_) {
+    return absl::InvalidArgumentError(
+        "WindowedLimit::Builder::MinWindowTimeNs must not exceed "
+        "MaxWindowTimeNs");
+  }
+  if (window_size_ < 1) {
+    return absl::InvalidArgumentError(
+        "WindowedLimit::Builder::WindowSize must be at least 1");
+  }
+  if (min_rtt_threshold_ns_ < 0) {
+    return absl::InvalidArgumentError(
+        "WindowedLimit::Builder::MinRttThresholdNs must be non-negative");
+  }
 
   // If the application did not supply a factory, default to the
   // average sample window — that's the upstream default too.

@@ -16,6 +16,7 @@
 #include "limen/simple_limiter.h"
 #include "limen/fixed_limit.h"
 #include "limen/settable_limit.h"
+#include "absl/status/status.h"
 #include "gtest/gtest.h"
 #include <atomic>
 #include <cstdint>
@@ -71,9 +72,18 @@ void operator delete[](void* p, std::size_t /*size*/) noexcept { std::free(p); }
 namespace limen {
 namespace {
 
+TEST(SimpleLimiterTest, BuildRejectsMissingLimit) {
+  auto result = SimpleLimiter::Builder().Id("test").Build();
+  EXPECT_EQ(result.status().code(), absl::StatusCode::kInvalidArgument);
+  EXPECT_NE(result.status().message().find("Limit()"), std::string::npos);
+}
+
 TEST(SimpleLimiterTest, AcquiresUpToCap) {
-  auto limiter =
-      SimpleLimiter::Builder().Limit(FixedLimit::Of(3)).Id("test").Build();
+  auto limiter = SimpleLimiter::Builder()
+                     .Limit(FixedLimit::Of(3))
+                     .Id("test")
+                     .Build()
+                     .value();
   auto a = limiter->TryAcquire();
   auto b = limiter->TryAcquire();
   auto c = limiter->TryAcquire();
@@ -85,8 +95,11 @@ TEST(SimpleLimiterTest, AcquiresUpToCap) {
 }
 
 TEST(SimpleLimiterTest, ReleaseReturnsSlot) {
-  auto limiter =
-      SimpleLimiter::Builder().Limit(FixedLimit::Of(2)).Id("test").Build();
+  auto limiter = SimpleLimiter::Builder()
+                     .Limit(FixedLimit::Of(2))
+                     .Id("test")
+                     .Build()
+                     .value();
   auto a = limiter->TryAcquire();
   auto b = limiter->TryAcquire();
   ASSERT_TRUE(a);
@@ -99,8 +112,11 @@ TEST(SimpleLimiterTest, ReleaseReturnsSlot) {
 }
 
 TEST(SimpleLimiterTest, SlotGuardDestructorDefaultsToOnIgnore) {
-  auto limiter =
-      SimpleLimiter::Builder().Limit(FixedLimit::Of(5)).Id("test").Build();
+  auto limiter = SimpleLimiter::Builder()
+                     .Limit(FixedLimit::Of(5))
+                     .Id("test")
+                     .Build()
+                     .value();
   {
     auto slot = limiter->TryAcquire();
     ASSERT_TRUE(slot);
@@ -113,8 +129,11 @@ TEST(SimpleLimiterTest, SlotGuardDestructorDefaultsToOnIgnore) {
 }
 
 TEST(SimpleLimiterTest, CounterConservation) {
-  auto limiter =
-      SimpleLimiter::Builder().Limit(FixedLimit::Of(20)).Id("test").Build();
+  auto limiter = SimpleLimiter::Builder()
+                     .Limit(FixedLimit::Of(20))
+                     .Id("test")
+                     .Build()
+                     .value();
   constexpr int kThreads = 8;
   constexpr int kIterationsPerThread = 1000;
 
@@ -146,8 +165,11 @@ TEST(SimpleLimiterTest, CounterConservation) {
 
 TEST(SimpleLimiterTest, NeverExceedsCapUnderContention) {
   constexpr int kCap = 5;
-  auto limiter =
-      SimpleLimiter::Builder().Limit(FixedLimit::Of(kCap)).Id("test").Build();
+  auto limiter = SimpleLimiter::Builder()
+                     .Limit(FixedLimit::Of(kCap))
+                     .Id("test")
+                     .Build()
+                     .value();
   // The contention surface is min(kThreads, kCap + 1) — only that
   // many threads can be racing on the CAS gate at any one moment.
   // 32 threads against a cap of 5 is plenty of pressure to exercise
@@ -195,7 +217,8 @@ TEST(SimpleLimiterTest, BypassPredicateMatchedBypasses) {
                      .Limit(FixedLimit::Of(1))
                      .Id("test")
                      .BypassPredicate(bypass)
-                     .Build();
+                     .Build()
+                     .value();
   // Saturate the gate with a normal admission.
   auto blocker = limiter->TryAcquire("normal");
   ASSERT_TRUE(blocker);
@@ -218,7 +241,8 @@ TEST(SimpleLimiterTest, BypassPredicateUnmatchedAdmitsNormally) {
                      .Limit(FixedLimit::Of(1))
                      .Id("test")
                      .BypassPredicate(bypass)
-                     .Build();
+                     .Build()
+                     .value();
   auto a = limiter->TryAcquire("normal");
   EXPECT_TRUE(a);
   EXPECT_EQ(limiter->InflightCount(), 1);
@@ -235,8 +259,11 @@ TEST(SimpleLimiterTest, ManyThreadsManyIterations) {
   // 32 x 500 here exceeds upstream's coverage at a thread count
   // that TSan's quadratic instrumentation cost can still handle.
   constexpr int kCap = 10;
-  auto limiter =
-      SimpleLimiter::Builder().Limit(FixedLimit::Of(kCap)).Id("test").Build();
+  auto limiter = SimpleLimiter::Builder()
+                     .Limit(FixedLimit::Of(kCap))
+                     .Id("test")
+                     .Build()
+                     .value();
   constexpr int kThreads = 32;
   constexpr int kIterationsPerThread = 500;
 
@@ -261,8 +288,11 @@ TEST(SimpleLimiterTest, ManyThreadsManyIterations) {
 }
 
 TEST(SimpleLimiterTest, NoAllocationOnAcquireRelease) {
-  auto limiter =
-      SimpleLimiter::Builder().Limit(FixedLimit::Of(100)).Id("test").Build();
+  auto limiter = SimpleLimiter::Builder()
+                     .Limit(FixedLimit::Of(100))
+                     .Id("test")
+                     .Build()
+                     .value();
 
   constexpr int kIterations = 10000;
   g_alloc_count.store(0, std::memory_order_relaxed);
@@ -280,8 +310,11 @@ TEST(SimpleLimiterTest, NoAllocationOnAcquireRelease) {
 TEST(SimpleLimiterTest, AdaptsToLimitChange) {
   auto wrapped = SettableLimit::StartingAt(5);
   auto* settable = wrapped.get();
-  auto limiter =
-      SimpleLimiter::Builder().Limit(std::move(wrapped)).Id("test").Build();
+  auto limiter = SimpleLimiter::Builder()
+                     .Limit(std::move(wrapped))
+                     .Id("test")
+                     .Build()
+                     .value();
 
   // Acquire up to the initial cap.
   std::vector<std::optional<Limiter::SlotGuard>> slots;

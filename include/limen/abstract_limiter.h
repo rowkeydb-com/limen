@@ -19,10 +19,12 @@
 #include "limen/limit.h"
 #include "limen/limiter.h"
 #include "opentelemetry/metrics/async_instruments.h"
+#include "opentelemetry/metrics/observer_result.h"
 #include "opentelemetry/sdk/metrics/meter_provider.h"
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -60,6 +62,11 @@ namespace limen {
 // in-flight atomic.
 class AbstractLimiter : public Limiter {
  public:
+  // Meter name under which all limen metrics are registered. Used
+  // by AbstractLimiter and by partitioned subclasses that register
+  // additional instruments on the same meter.
+  static constexpr char kMeterName[] = "limen";
+
   // Five mutually-exclusive outcomes for one admission decision.
   enum class Status : int {
     kSuccess = 0,
@@ -96,28 +103,83 @@ class AbstractLimiter : public Limiter {
     std::shared_ptr<opentelemetry::sdk::metrics::MeterProvider> meter_provider;
   };
 
+  // Return value of `DoAcquire` on admission. `inflight_post` is
+  // the post-increment global in-flight value; `partition_index`
+  // identifies the partition slot that was reserved (or -1 if the
+  // limiter is not partitioned). The partition slot, when set,
+  // travels through SlotGuard to OnSlotComplete so the partition
+  // counter can be released alongside the global one.
+  struct AcquireResult {
+    int inflight_post;
+    int partition_index;
+  };
+
   explicit AbstractLimiter(Params params);
 
   // Subclasses implement the per-call admission gate. On admission,
   // the override must atomically reserve a slot — that is, leave
   // the in-flight counter incremented by exactly one — and return
-  // the post-increment value. On rejection, return std::nullopt
-  // without touching the counter. The base implementation admits
-  // unconditionally with a plain fetch_add, which is useful for
-  // tests that only need to exercise the bookkeeping machinery.
-  // SimpleLimiter overrides this with a compare-and-swap loop
-  // that checks the in-flight value against the cap before
-  // committing the increment.
-  virtual std::optional<int> DoAcquire(std::string_view context);
+  // an AcquireResult carrying the post-increment in-flight value
+  // and (for partitioned limiters) the resolved partition index.
+  // On rejection, return std::nullopt without touching the counter.
+  // The base implementation admits unconditionally with a plain
+  // fetch_add and returns a -1 partition index, which is useful
+  // for tests that only need to exercise the bookkeeping machinery.
+  // SimpleLimiter overrides this with a compare-and-swap loop;
+  // AbstractPartitionedLimiter overrides it with a partition-aware
+  // gate.
+  virtual std::optional<AcquireResult> DoAcquire(std::string_view context);
 
   // Hook called by the SlotGuard on completion. Decrements
   // in-flight (for non-bypass calls), increments the appropriate
-  // outcome counter, and feeds a sample to the wrapped algorithm
-  // when the outcome warrants one. Bypass calls already had their
-  // counter incremented at acquire time; the bypass SlotGuard's
-  // completion is a no-op for accounting purposes.
+  // outcome counter, feeds a sample to the wrapped algorithm when
+  // the outcome warrants one, and calls `OnReleasePartition` so a
+  // partitioned subclass can release its per-partition counter.
+  // Bypass calls already had their counter incremented at acquire
+  // time; the bypass SlotGuard's completion is a no-op for
+  // accounting purposes.
   void OnSlotComplete(CompletionStatus status, int64_t start_time_ns,
-                      int inflight_at_acquire, bool bypassed) final;
+                      int inflight_at_acquire, bool bypassed,
+                      int partition_index) final;
+
+  // Partitioned subclasses override to decrement the per-partition
+  // in-flight counter. The base implementation is a no-op. Called
+  // from OnSlotComplete with the partition index recorded at
+  // acquire time, only for non-bypass completions.
+  virtual void OnReleasePartition(int /*partition_index*/) {}
+
+  // Read-only accessors for partitioned subclasses that need to
+  // wire their own observable instruments onto the same meter and
+  // identify the limiter in metric label sets.
+  std::shared_ptr<opentelemetry::sdk::metrics::MeterProvider> const&
+  GetMeterProvider() const {
+    return meter_provider_;
+  }
+  std::string const& GetId() const { return id_; }
+
+  // Register a callback invoked when the wrapped Limit's cap
+  // changes (a `SettableLimit::SetLimit` override or a Gradient2
+  // adaptive update). Partitioned subclasses use this to recompute
+  // per-partition quotas without exposing the wrapped Limit
+  // pointer itself.
+  void RegisterLimitChangeCallback(Limit::ChangeCallback callback);
+
+  // Emission hook for the `limen.inflight` observable up-down
+  // counter. The default implementation emits one point with just
+  // the `id` label (the global in-flight value). Partitioned
+  // subclasses override to emit additional per-partition points
+  // on the same instrument so an operator can see global and
+  // per-partition counts under the same metric name.
+  virtual void OnObserveInflight(
+      opentelemetry::metrics::ObserverResult const& result) const;
+
+  // Emit one observation row through the OpenTelemetry collector.
+  // Wrapped here so partitioned subclasses can format their own
+  // per-partition rows without duplicating the attribute-view
+  // boilerplate.
+  static void EmitObservation(
+      opentelemetry::metrics::ObserverResult const& result, int64_t value,
+      std::map<std::string, std::string> const& attributes);
 
   // In-flight atomic. Exposed to subclasses so they can implement
   // their own compare-and-swap-based admission gate against it.

@@ -15,11 +15,13 @@
 
 #include "limen/windowed_limit.h"
 #include "limen/limit.h"
+#include "absl/status/status.h"
 #include "gtest/gtest.h"
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -116,6 +118,62 @@ class CountingLimit final : public Limit {
   std::vector<int64_t> fire_start_times;
 };
 
+TEST(WindowedLimitTest, BuildRejectsNonPositiveMinWindowTime) {
+  auto delegate = std::make_unique<CountingLimit>();
+  auto result = WindowedLimit::Builder()
+                    .MinWindowTimeNs(0)
+                    .MaxWindowTimeNs(1'000'000)
+                    .Build(std::move(delegate));
+  EXPECT_EQ(result.status().code(), absl::StatusCode::kInvalidArgument);
+  EXPECT_NE(result.status().message().find("MinWindowTimeNs"),
+            std::string::npos);
+}
+
+TEST(WindowedLimitTest, BuildRejectsNonPositiveMaxWindowTime) {
+  auto delegate = std::make_unique<CountingLimit>();
+  auto result = WindowedLimit::Builder()
+                    .MinWindowTimeNs(1'000'000)
+                    .MaxWindowTimeNs(0)
+                    .Build(std::move(delegate));
+  EXPECT_EQ(result.status().code(), absl::StatusCode::kInvalidArgument);
+  EXPECT_NE(result.status().message().find("MaxWindowTimeNs"),
+            std::string::npos);
+}
+
+TEST(WindowedLimitTest, BuildRejectsInvertedMinMaxWindowTime) {
+  auto delegate = std::make_unique<CountingLimit>();
+  auto result = WindowedLimit::Builder()
+                    .MinWindowTimeNs(2'000'000)
+                    .MaxWindowTimeNs(1'000'000)
+                    .Build(std::move(delegate));
+  EXPECT_EQ(result.status().code(), absl::StatusCode::kInvalidArgument);
+  EXPECT_NE(result.status().message().find("must not exceed"),
+            std::string::npos);
+}
+
+TEST(WindowedLimitTest, BuildRejectsZeroWindowSize) {
+  auto delegate = std::make_unique<CountingLimit>();
+  auto result = WindowedLimit::Builder()
+                    .MinWindowTimeNs(1'000'000)
+                    .MaxWindowTimeNs(1'000'000)
+                    .WindowSize(0)
+                    .Build(std::move(delegate));
+  EXPECT_EQ(result.status().code(), absl::StatusCode::kInvalidArgument);
+  EXPECT_NE(result.status().message().find("WindowSize"), std::string::npos);
+}
+
+TEST(WindowedLimitTest, BuildRejectsNegativeMinRttThreshold) {
+  auto delegate = std::make_unique<CountingLimit>();
+  auto result = WindowedLimit::Builder()
+                    .MinWindowTimeNs(1'000'000)
+                    .MaxWindowTimeNs(1'000'000)
+                    .MinRttThresholdNs(-1)
+                    .Build(std::move(delegate));
+  EXPECT_EQ(result.status().code(), absl::StatusCode::kInvalidArgument);
+  EXPECT_NE(result.status().message().find("MinRttThresholdNs"),
+            std::string::npos);
+}
+
 TEST(WindowedLimitTest, SamplesBelowMinRttThresholdAreDropped) {
   auto delegate = std::make_unique<CountingLimit>();
   auto* counting = delegate.get();
@@ -123,7 +181,8 @@ TEST(WindowedLimitTest, SamplesBelowMinRttThresholdAreDropped) {
                       .MinWindowTimeNs(1'000'000)
                       .MaxWindowTimeNs(1'000'000)
                       .WindowSize(5)
-                      .Build(std::move(delegate));
+                      .Build(std::move(delegate))
+                      .value();
 
   // Sub-threshold samples (default threshold is 100µs).
   for (int i = 0; i < 200; ++i) {
@@ -139,7 +198,8 @@ TEST(WindowedLimitTest, WindowNotReadyUntilWindowSizeReached) {
                       .MinWindowTimeNs(1'000'000)
                       .MaxWindowTimeNs(1'000'000)
                       .WindowSize(20)
-                      .Build(std::move(delegate));
+                      .Build(std::move(delegate))
+                      .value();
 
   for (int i = 0; i < 5; ++i) {
     windowed->OnSample(static_cast<int64_t>(i) * 200'000, 500'000, 1, false);
@@ -155,7 +215,8 @@ TEST(WindowedLimitTest, WindowReadyAfterSamplesAndTime) {
                       .MinWindowTimeNs(1'000'000)
                       .MaxWindowTimeNs(1'000'000)
                       .WindowSize(10)
-                      .Build(std::move(delegate));
+                      .Build(std::move(delegate))
+                      .value();
 
   // Sample 0 triggers a warmup boundary (1 sample, not ready); the
   // active index flips. Samples 1..11 land in the new active slot,
@@ -180,7 +241,8 @@ TEST(WindowedLimitTest, BoundarySwapResetsInactive) {
                       .MinWindowTimeNs(1'000'000)
                       .MaxWindowTimeNs(1'000'000)
                       .WindowSize(5)
-                      .Build(std::move(delegate));
+                      .Build(std::move(delegate))
+                      .value();
 
   for (int i = 0; i < 10; ++i) {
     windowed->OnSample(static_cast<int64_t>(i) * 100'000, 100'000, 1, false);
@@ -217,14 +279,16 @@ TEST(WindowedLimitTest, AdaptiveWindowSize) {
                           .MinWindowTimeNs(1'000'000)
                           .MaxWindowTimeNs(10'000'000)
                           .WindowSize(10)
-                          .Build(std::move(fast_delegate));
+                          .Build(std::move(fast_delegate))
+                          .value();
   auto slow_delegate = std::make_unique<CountingLimit>();
   auto* slow = slow_delegate.get();
   auto slow_limiter = WindowedLimit::Builder()
                           .MinWindowTimeNs(1'000'000)
                           .MaxWindowTimeNs(10'000'000)
                           .WindowSize(10)
-                          .Build(std::move(slow_delegate));
+                          .Build(std::move(slow_delegate))
+                          .value();
 
   for (int i = 0; i < 1000; ++i) {
     int64_t const t = static_cast<int64_t>(i) * 100'000;
@@ -248,7 +312,7 @@ TEST(WindowedLimitTest, AdaptiveWindowSize) {
 
 TEST(WindowedLimitTest, GetLimitDelegates) {
   auto delegate = std::make_unique<CountingLimit>();
-  auto windowed = WindowedLimit::Builder().Build(std::move(delegate));
+  auto windowed = WindowedLimit::Builder().Build(std::move(delegate)).value();
   EXPECT_EQ(windowed->GetLimit(), 100);
 }
 
@@ -266,7 +330,8 @@ TEST(WindowedLimitTest, NoAllocationAfterConstruction) {
                       .MinWindowTimeNs(1'000'000)
                       .MaxWindowTimeNs(1'000'000)
                       .WindowSize(5)
-                      .Build(std::move(delegate));
+                      .Build(std::move(delegate))
+                      .value();
 
   g_alloc_count.store(0, std::memory_order_relaxed);
   g_alloc_tracking.store(true, std::memory_order_relaxed);
@@ -293,7 +358,8 @@ TEST(WindowedLimitTest, ConcurrentSamplesAcrossBoundary) {
                       .MinWindowTimeNs(1'000'000)
                       .MaxWindowTimeNs(1'000'000)
                       .WindowSize(5)
-                      .Build(std::move(delegate));
+                      .Build(std::move(delegate))
+                      .value();
 
   constexpr int kThreads = 8;
   constexpr int kSamplesPerThread = 2000;
@@ -335,7 +401,8 @@ TEST(WindowedLimitTest, BoundaryThreadWinsTryLockExclusively) {
                       .MinWindowTimeNs(1'000'000)
                       .MaxWindowTimeNs(1'000'000)
                       .WindowSize(5)
-                      .Build(std::move(delegate));
+                      .Build(std::move(delegate))
+                      .value();
 
   // Warm up the active slot with enough samples that a boundary
   // crossing will find it ready (>= window_size = 5). Sample 0

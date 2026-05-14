@@ -32,8 +32,6 @@
 namespace limen {
 namespace {
 
-constexpr char kMeterName[] = "limen";
-
 int64_t NowNs() {
   return std::chrono::duration_cast<std::chrono::nanoseconds>(
              std::chrono::steady_clock::now().time_since_epoch())
@@ -84,34 +82,39 @@ std::optional<Limiter::SlotGuard> AbstractLimiter::TryAcquire(
     outcome_counts_[static_cast<int>(Status::kBypassed)].fetch_add(
         1, std::memory_order_relaxed);
     return MakeSlot(this, /*start_time_ns=*/0, /*inflight_at_acquire=*/0,
-                    /*bypassed=*/true);
+                    /*bypassed=*/true, /*partition_index=*/-1);
   }
 
   // Non-bypass: delegate to the subclass's gate. On admission the
-  // override returns the post-increment in-flight value; on
+  // override returns the post-increment in-flight value plus a
+  // partition index (-1 for non-partitioned limiters); on
   // rejection, std::nullopt. The base implementation admits
   // unconditionally; SimpleLimiter overrides DoAcquire with a
-  // compare-and-swap loop that checks the in-flight value against
-  // the cap.
-  std::optional<int> const inflight_at_acquire = DoAcquire(context);
-  if (!inflight_at_acquire) {
+  // compare-and-swap loop; AbstractPartitionedLimiter overrides it
+  // with a partition-aware gate that also resolves and reserves
+  // the partition slot.
+  std::optional<AcquireResult> const result = DoAcquire(context);
+  if (!result) {
     outcome_counts_[static_cast<int>(Status::kRejected)].fetch_add(
         1, std::memory_order_relaxed);
     return std::nullopt;
   }
 
   int64_t const start_time_ns = NowNs();
-  return MakeSlot(this, start_time_ns, *inflight_at_acquire,
-                  /*bypassed=*/false);
+  return MakeSlot(this, start_time_ns, result->inflight_post,
+                  /*bypassed=*/false, result->partition_index);
 }
 
-std::optional<int> AbstractLimiter::DoAcquire(std::string_view /*context*/) {
-  return inflight_.fetch_add(1, std::memory_order_relaxed) + 1;
+std::optional<AbstractLimiter::AcquireResult> AbstractLimiter::DoAcquire(
+    std::string_view /*context*/) {
+  return AcquireResult{inflight_.fetch_add(1, std::memory_order_relaxed) + 1,
+                       -1};
 }
 
 void AbstractLimiter::OnSlotComplete(CompletionStatus status,
                                      int64_t start_time_ns,
-                                     int inflight_at_acquire, bool bypassed) {
+                                     int inflight_at_acquire, bool bypassed,
+                                     int partition_index) {
   // Bypassed calls were accounted for at acquire time and never
   // touched the in-flight counter. The SlotGuard's completion is
   // a no-op for accounting purposes.
@@ -120,6 +123,7 @@ void AbstractLimiter::OnSlotComplete(CompletionStatus status,
   }
 
   inflight_.fetch_sub(1, std::memory_order_relaxed);
+  OnReleasePartition(partition_index);
 
   Status const outcome = ToOutcomeStatus(status);
   outcome_counts_[static_cast<int>(outcome)].fetch_add(
@@ -133,6 +137,11 @@ void AbstractLimiter::OnSlotComplete(CompletionStatus status,
     bool const did_drop = (outcome == Status::kDropped);
     limit_->OnSample(start_time_ns, rtt_ns, inflight_at_acquire, did_drop);
   }
+}
+
+void AbstractLimiter::RegisterLimitChangeCallback(
+    Limit::ChangeCallback callback) {
+  limit_->NotifyOnChange(std::move(callback));
 }
 
 void AbstractLimiter::RegisterObservableInstruments() {
@@ -155,34 +164,34 @@ void AbstractLimiter::RegisterObservableInstruments() {
   call_counter_->AddCallback(&AbstractLimiter::ObserveCall, this);
 }
 
-namespace {
-
-void ObserveOne(opentelemetry::metrics::ObserverResult const& result,
-                int64_t value,
-                std::map<std::string, std::string> const& attrs) {
-  opentelemetry::common::KeyValueIterableView attr_view(attrs);
+void AbstractLimiter::EmitObservation(
+    opentelemetry::metrics::ObserverResult const& result, int64_t value,
+    std::map<std::string, std::string> const& attributes) {
+  opentelemetry::common::KeyValueIterableView attr_view(attributes);
   auto int_observer =
       opentelemetry::nostd::get<opentelemetry::nostd::shared_ptr<
           opentelemetry::metrics::ObserverResultT<int64_t>>>(result);
   int_observer->Observe(value, attr_view);
 }
 
-}  // namespace
-
 void AbstractLimiter::ObserveLimit(
     opentelemetry::metrics::ObserverResult result, void* state) noexcept {
   auto* self = static_cast<AbstractLimiter*>(state);
-  ObserveOne(result, static_cast<int64_t>(self->limit_->GetLimit()),
-             {{"id", self->id_}});
+  EmitObservation(result, static_cast<int64_t>(self->limit_->GetLimit()),
+                  {{"id", self->id_}});
 }
 
 void AbstractLimiter::ObserveInflight(
     opentelemetry::metrics::ObserverResult result, void* state) noexcept {
   auto* self = static_cast<AbstractLimiter*>(state);
-  ObserveOne(
-      result,
-      static_cast<int64_t>(self->inflight_.load(std::memory_order_relaxed)),
-      {{"id", self->id_}});
+  self->OnObserveInflight(result);
+}
+
+void AbstractLimiter::OnObserveInflight(
+    opentelemetry::metrics::ObserverResult const& result) const {
+  EmitObservation(
+      result, static_cast<int64_t>(inflight_.load(std::memory_order_relaxed)),
+      {{"id", id_}});
 }
 
 void AbstractLimiter::ObserveCall(opentelemetry::metrics::ObserverResult result,
@@ -193,7 +202,7 @@ void AbstractLimiter::ObserveCall(opentelemetry::metrics::ObserverResult result,
         self->outcome_counts_[i].load(std::memory_order_relaxed);
     std::map<std::string, std::string> attrs{{"id", self->id_},
                                              {"status", kStatusLabels[i]}};
-    ObserveOne(result, value, attrs);
+    EmitObservation(result, value, attrs);
   }
 }
 
