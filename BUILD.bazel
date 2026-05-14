@@ -10,19 +10,28 @@ cc_library(
     name = "limen",
     srcs = [
         "src/abstract_limit.cc",
+        "src/average_sample_window.cc",
         "src/exp_avg_measurement.cc",
         "src/gradient2_limit.cc",
+        "src/percentile_sample_window.cc",
+        "src/tracing_limit_decorator.cc",
+        "src/windowed_limit.cc",
     ],
     hdrs = [
         "include/limen/abstract_limit.h",
+        "include/limen/average_sample_window.h",
         "include/limen/exp_avg_measurement.h",
         "include/limen/fixed_limit.h",
         "include/limen/gradient2_limit.h",
         "include/limen/limit.h",
         "include/limen/measurement.h",
         "include/limen/minimum_measurement.h",
+        "include/limen/percentile_sample_window.h",
+        "include/limen/sample_window.h",
         "include/limen/settable_limit.h",
         "include/limen/single_measurement.h",
+        "include/limen/tracing_limit_decorator.h",
+        "include/limen/windowed_limit.h",
     ],
     strip_include_prefix = "include",
     deps = [
@@ -85,5 +94,41 @@ cc_test(
         ":limen",
         "@googletest//:gtest_main",
         "@opentelemetry-cpp//sdk/src/metrics",
+    ],
+)
+
+cc_test(
+    name = "average_sample_window_test",
+    srcs = ["test/average_sample_window_test.cc"],
+    deps = [
+        ":limen",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "percentile_sample_window_test",
+    srcs = ["test/percentile_sample_window_test.cc"],
+    deps = [
+        ":limen",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "windowed_limit_test",
+    srcs = ["test/windowed_limit_test.cc"],
+    deps = [
+        ":limen",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "tracing_limit_decorator_test",
+    srcs = ["test/tracing_limit_decorator_test.cc"],
+    deps = [
+        ":limen",
+        "@googletest//:gtest_main",
     ],
 )
