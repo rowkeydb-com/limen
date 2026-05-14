@@ -14,6 +14,7 @@
 // permissions and limitations under the License.
 
 #include "limen/gradient2_limit.h"
+#include "limen/abstract_limiter.h"
 #include "opentelemetry/common/attribute_value.h"
 #include "opentelemetry/common/key_value_iterable_view.h"
 #include "opentelemetry/context/context.h"
@@ -33,10 +34,6 @@ namespace limen {
 namespace {
 
 namespace sdk_metrics = opentelemetry::sdk::metrics;
-
-// Library name used in the OpenTelemetry MeterSelector and as the
-// instrumentation scope name passed to GetMeter().
-constexpr char kMeterName[] = "limen";
 
 // Bucket boundaries for the two RTT histograms, expressed in
 // nanoseconds (the unit of the value Limen records). The design
@@ -65,7 +62,7 @@ void RegisterHistogramView(sdk_metrics::MeterProvider& provider,
   auto instrument_selector = std::make_unique<sdk_metrics::InstrumentSelector>(
       sdk_metrics::InstrumentType::kHistogram, instrument_name, unit);
   auto meter_selector = std::make_unique<sdk_metrics::MeterSelector>(
-      kMeterName, /*version=*/"", /*schema=*/"");
+      AbstractLimiter::kMeterName, /*version=*/"", /*schema=*/"");
 
   auto aggregation_config =
       std::make_shared<sdk_metrics::HistogramAggregationConfig>();
@@ -129,8 +126,8 @@ Gradient2Limit::Gradient2Limit(Params params)
       "Algorithm queue-size constant (additive-increase amount), per window.",
       "1", QueueSizeBuckets());
 
-  auto meter = params.meter_provider->GetMeter(kMeterName, /*version=*/"",
-                                               /*schema=*/"");
+  auto meter = params.meter_provider->GetMeter(AbstractLimiter::kMeterName,
+                                               /*version=*/"", /*schema=*/"");
   long_rtt_hist_ = meter->CreateDoubleHistogram(
       "limen.min_rtt", "Long-term baseline RTT, per window.", "ns");
   short_rtt_hist_ = meter->CreateDoubleHistogram(

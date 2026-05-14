@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <latch>
 #include <limits>
 #include <random>
 #include <thread>
@@ -145,12 +146,10 @@ TEST(PercentileSampleWindowTest, ConcurrentAddsAreLossless) {
 
   std::vector<std::thread> threads;
   threads.reserve(kThreads);
-  std::atomic<int> ready_threads{0};
+  std::latch start{kThreads};
   for (int t = 0; t < kThreads; ++t) {
     threads.emplace_back([&] {
-      ready_threads.fetch_add(1);
-      while (ready_threads.load() < kThreads) {
-      }
+      start.arrive_and_wait();
       for (int i = 0; i < kSamplesPerThread; ++i) {
         window.AddSample(1000, 1, false);
       }

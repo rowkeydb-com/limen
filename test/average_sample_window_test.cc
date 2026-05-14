@@ -16,6 +16,7 @@
 #include "limen/average_sample_window.h"
 #include "gtest/gtest.h"
 #include <atomic>
+#include <latch>
 #include <limits>
 #include <thread>
 #include <vector>
@@ -88,12 +89,10 @@ TEST(AverageSampleWindowTest, ConcurrentAddsAreLossless) {
 
   std::vector<std::thread> threads;
   threads.reserve(kThreads);
-  std::atomic<int> ready_threads{0};
+  std::latch start{kThreads};
   for (int t = 0; t < kThreads; ++t) {
     threads.emplace_back([&] {
-      ready_threads.fetch_add(1);
-      while (ready_threads.load() < kThreads) {
-      }
+      start.arrive_and_wait();
       for (int i = 0; i < kSamplesPerThread; ++i) {
         window.AddSample(1000, 1, false);
       }

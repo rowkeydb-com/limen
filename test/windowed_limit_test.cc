@@ -20,6 +20,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <latch>
 #include <memory>
 #include <string>
 #include <thread>
@@ -363,16 +364,14 @@ TEST(WindowedLimitTest, ConcurrentSamplesAcrossBoundary) {
 
   constexpr int kThreads = 8;
   constexpr int kSamplesPerThread = 2000;
-  std::atomic<int> ready{0};
+  std::latch start{kThreads};
   std::atomic<int64_t> time_base{0};
 
   std::vector<std::thread> threads;
   threads.reserve(kThreads);
   for (int t = 0; t < kThreads; ++t) {
     threads.emplace_back([&] {
-      ready.fetch_add(1);
-      while (ready.load() < kThreads) {
-      }
+      start.arrive_and_wait();
       for (int i = 0; i < kSamplesPerThread; ++i) {
         int64_t const t_ns =
             time_base.fetch_add(1000, std::memory_order_relaxed);
@@ -423,14 +422,12 @@ TEST(WindowedLimitTest, BoundaryThreadWinsTryLockExclusively) {
   // observe the lock held and bail out without driving the
   // delegate.
   constexpr int kThreads = 16;
-  std::atomic<int> ready{0};
+  std::latch start{kThreads};
   std::vector<std::thread> threads;
   threads.reserve(kThreads);
   for (int i = 0; i < kThreads; ++i) {
     threads.emplace_back([&] {
-      ready.fetch_add(1);
-      while (ready.load() < kThreads) {
-      }
+      start.arrive_and_wait();
       windowed->OnSample(/*start_time_ns=*/5'000'000, /*rtt_ns=*/500'000, 1,
                          false);
     });

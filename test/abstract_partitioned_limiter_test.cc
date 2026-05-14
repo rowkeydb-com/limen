@@ -616,12 +616,19 @@ TEST(AbstractPartitionedLimiterTest, RejectDelayCappedByMaxDelayedThreads) {
   // threads may be sleeping at any moment.
   std::atomic<int> inside_sleep{0};
   std::atomic<int> peak_inside{0};
+  // The cap is two; exactly two threads enter `gated_sleep`. The
+  // `parked_latch` counts down once per thread on entry so the
+  // main thread can wait deterministically until both are parked.
+  // `release_sleepers` is a separate latch the main thread fires
+  // to let the parked threads finish.
+  std::latch parked_latch{2};
   std::latch release_sleepers{1};
   auto gated_sleep = [&](std::chrono::milliseconds /*d*/) {
     int const live = inside_sleep.fetch_add(1) + 1;
     int prev = peak_inside.load();
     while (live > prev && !peak_inside.compare_exchange_weak(prev, live)) {
     }
+    parked_latch.count_down();
     release_sleepers.wait();
     inside_sleep.fetch_sub(1);
   };
@@ -657,13 +664,12 @@ TEST(AbstractPartitionedLimiterTest, RejectDelayCappedByMaxDelayedThreads) {
     });
   }
 
-  // Wait deterministically for the two parked sleepers to be
-  // observable. The latch wait above is the synchronisation
-  // point; once both parked threads have incremented
-  // `inside_sleep`, the peak is recorded. Spin without sleeping
-  // because the assertion does not care about timing — it cares
-  // about the steady-state count.
-  while (inside_sleep.load() < 2) std::this_thread::yield();
+  // Wait deterministically for both parked sleepers to land in
+  // `gated_sleep`. Each thread counts down `parked_latch` after
+  // updating `peak_inside`; when both have, `wait()` returns and
+  // the steady-state peak is the value we assert on. Futex-backed,
+  // no busy-wait under TSan instrumentation.
+  parked_latch.wait();
 
   release_sleepers.count_down();
   for (auto& thr : threads) thr.join();
