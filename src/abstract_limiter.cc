@@ -25,6 +25,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -47,55 +48,21 @@ constexpr char const* kStatusLabels[] = {
 static_assert(std::size(kStatusLabels) == AbstractLimiter::kStatusCount,
               "kStatusLabels must have one entry per Status value");
 
+// Maps the polymorphic completion status to the corresponding
+// Status enum slot.
+AbstractLimiter::Status ToOutcomeStatus(Limiter::CompletionStatus status) {
+  switch (status) {
+    case Limiter::CompletionStatus::kSuccess:
+      return AbstractLimiter::Status::kSuccess;
+    case Limiter::CompletionStatus::kIgnored:
+      return AbstractLimiter::Status::kIgnored;
+    case Limiter::CompletionStatus::kDropped:
+      return AbstractLimiter::Status::kDropped;
+  }
+  return AbstractLimiter::Status::kIgnored;
+}
+
 }  // namespace
-
-// Concrete Listener for an admitted call. Captures per-call state
-// at admission (start timestamp, in-flight count at acquire) and
-// the back-reference to the limiter. The completion methods
-// delegate to `AbstractLimiter::RecordOutcome`. Defined as a
-// private nested class so it inherits access to the enclosing
-// class's protected members.
-class AbstractLimiter::CallListener final : public Limiter::Listener {
- public:
-  CallListener(AbstractLimiter* limiter, int64_t start_time_ns,
-               int inflight_at_acquire)
-      : limiter_(limiter),
-        start_time_ns_(start_time_ns),
-        inflight_at_acquire_(inflight_at_acquire) {}
-
-  void OnSuccess() override {
-    limiter_->RecordOutcome(AbstractLimiter::Status::kSuccess, start_time_ns_,
-                            inflight_at_acquire_);
-  }
-
-  void OnIgnore() override {
-    limiter_->RecordOutcome(AbstractLimiter::Status::kIgnored, start_time_ns_,
-                            inflight_at_acquire_);
-  }
-
-  void OnDropped() override {
-    limiter_->RecordOutcome(AbstractLimiter::Status::kDropped, start_time_ns_,
-                            inflight_at_acquire_);
-  }
-
- private:
-  AbstractLimiter* limiter_;
-  int64_t start_time_ns_;
-  int inflight_at_acquire_;
-};
-
-// Listener returned by the bypass branch. The bypassed counter is
-// incremented at acquire time (in TryAcquire), so the completion
-// methods are pure no-ops: the call neither touched the in-flight
-// gate nor signals real system load, so there is nothing to
-// release and no sample to feed.
-class AbstractLimiter::BypassListener final : public Limiter::Listener {
- public:
-  BypassListener() = default;
-  void OnSuccess() override {}
-  void OnIgnore() override {}
-  void OnDropped() override {}
-};
 
 AbstractLimiter::AbstractLimiter(Params params)
     : limit_(std::move(params.limit)),
@@ -105,54 +72,65 @@ AbstractLimiter::AbstractLimiter(Params params)
   RegisterObservableInstruments();
 }
 
-std::unique_ptr<Limiter::Listener> AbstractLimiter::TryAcquire(
+std::optional<Limiter::SlotGuard> AbstractLimiter::TryAcquire(
     std::string_view context) {
   // Bypass: the call opts out of admission control entirely. The
   // bypassed counter is incremented here at acquire time (matching
   // upstream Java's createBypassListener behaviour); the returned
-  // BypassListener does nothing on completion, so a bypassed call
-  // whose listener is destructed without an explicit On* call
-  // still contributes to the counter.
+  // SlotGuard does nothing on completion, so a bypassed call whose
+  // SlotGuard is destroyed without an explicit On* call still
+  // contributes to the counter.
   if (bypass_predicate_ && bypass_predicate_(context)) {
     outcome_counts_[static_cast<int>(Status::kBypassed)].fetch_add(
         1, std::memory_order_relaxed);
-    return std::make_unique<BypassListener>();
+    return MakeSlot(this, /*start_time_ns=*/0, /*inflight_at_acquire=*/0,
+                    /*bypassed=*/true);
   }
 
-  // Non-bypass: delegate to the subclass's gate. The base
-  // implementation admits unconditionally; SimpleLimiter (commit 6)
-  // overrides to do the compare-and-swap on the in-flight atomic.
-  if (!DoAcquire(context)) {
+  // Non-bypass: delegate to the subclass's gate. On admission the
+  // override returns the post-increment in-flight value; on
+  // rejection, std::nullopt. The base implementation admits
+  // unconditionally; SimpleLimiter overrides DoAcquire with a
+  // compare-and-swap loop that checks the in-flight value against
+  // the cap.
+  std::optional<int> const inflight_at_acquire = DoAcquire(context);
+  if (!inflight_at_acquire) {
     outcome_counts_[static_cast<int>(Status::kRejected)].fetch_add(
         1, std::memory_order_relaxed);
-    return nullptr;
+    return std::nullopt;
   }
 
-  // Admitted. Increment the in-flight counter (the gate already
-  // checked admission against the cap if the subclass implements
-  // one). Capture the value AFTER our increment so the listener's
-  // completion can pass a stable count to the algorithm.
   int64_t const start_time_ns = NowNs();
-  int const inflight_at_acquire =
-      inflight_.fetch_add(1, std::memory_order_relaxed) + 1;
-  return std::make_unique<CallListener>(this, start_time_ns,
-                                        inflight_at_acquire);
+  return MakeSlot(this, start_time_ns, *inflight_at_acquire,
+                  /*bypassed=*/false);
 }
 
-bool AbstractLimiter::DoAcquire(std::string_view /*context*/) { return true; }
+std::optional<int> AbstractLimiter::DoAcquire(std::string_view /*context*/) {
+  return inflight_.fetch_add(1, std::memory_order_relaxed) + 1;
+}
 
-void AbstractLimiter::RecordOutcome(Status status, int64_t start_time_ns,
-                                    int inflight_at_acquire) {
+void AbstractLimiter::OnSlotComplete(CompletionStatus status,
+                                     int64_t start_time_ns,
+                                     int inflight_at_acquire, bool bypassed) {
+  // Bypassed calls were accounted for at acquire time and never
+  // touched the in-flight counter. The SlotGuard's completion is
+  // a no-op for accounting purposes.
+  if (bypassed) {
+    return;
+  }
+
   inflight_.fetch_sub(1, std::memory_order_relaxed);
-  outcome_counts_[static_cast<int>(status)].fetch_add(
+
+  Status const outcome = ToOutcomeStatus(status);
+  outcome_counts_[static_cast<int>(outcome)].fetch_add(
       1, std::memory_order_relaxed);
 
   // Feed a sample to the wrapped algorithm for the two completion
   // outcomes that carry latency information. Ignored calls do not
   // signal real system load and so contribute no sample.
-  if (status == Status::kSuccess || status == Status::kDropped) {
+  if (outcome == Status::kSuccess || outcome == Status::kDropped) {
     int64_t const rtt_ns = NowNs() - start_time_ns;
-    bool const did_drop = (status == Status::kDropped);
+    bool const did_drop = (outcome == Status::kDropped);
     limit_->OnSample(start_time_ns, rtt_ns, inflight_at_acquire, did_drop);
   }
 }

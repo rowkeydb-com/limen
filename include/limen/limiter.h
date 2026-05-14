@@ -16,7 +16,8 @@
 #ifndef LIMEN_LIMITER_H_
 #define LIMEN_LIMITER_H_
 
-#include <memory>
+#include <cstdint>
+#include <optional>
 #include <string_view>
 
 namespace limen {
@@ -24,56 +25,34 @@ namespace limen {
 // Contract for an admission-control limiter.
 //
 // A caller asks the limiter for permission to start a unit of work
-// by calling `TryAcquire`. If the limiter admits the call, it
-// returns a Listener that the caller is expected to notify when the
-// work completes; the Listener carries the bookkeeping that updates
-// the in-flight counter and feeds a sample to the wrapped algorithm.
-// If the limiter rejects the call, `TryAcquire` returns null and the
-// caller is expected to fail-fast or shed elsewhere.
+// by calling `TryAcquire`. The return value is `std::nullopt` on
+// rejection and a `SlotGuard` on admission. The caller invokes one
+// of `OnSuccess`, `OnIgnore`, or `OnDropped` on the SlotGuard when
+// the work completes; the SlotGuard's destructor defaults to
+// `OnIgnore` if no completion call was made by the time the
+// SlotGuard falls out of scope.
+//
+// `SlotGuard` is move-only and stores its per-call state inline:
+// a back-pointer to the limiter, the start timestamp, the in-flight
+// count at admission, a bypassed flag, and a completion-flag. The
+// per-request path performs no heap allocation: TryAcquire returns
+// the SlotGuard by value through `std::optional`, and the SlotGuard
+// lives on the caller's stack until the work completes.
 //
 // The `context` argument is an opaque string view applications use
 // to scope the admission decision: a route name, a tenant id, an
-// RPC method, anything. The default context is empty. Implementations
-// inspect it through configured bypass predicates and partitioning
-// hooks; the base `Limiter` itself imposes no structure on it.
+// RPC method, anything. The default context is empty.
 //
-// Ported from Netflix's `Limiter.java`.
+// Ported from Netflix's `Limiter.java`. The polymorphic-listener
+// shape upstream's Java relies on for garbage-collected lifetime
+// becomes a value-type RAII guard in C++ so the per-request hot
+// path stays allocation-free.
 class Limiter {
  public:
-  // The Listener captures the per-call state the limiter needs to
-  // record an outcome (the in-flight count at admission, a
-  // monotonic timestamp at admission). The caller invokes exactly
-  // one of `OnSuccess`, `OnIgnore`, or `OnDropped` when the work
-  // completes.
-  //
-  // Ported from Netflix's `Limiter.Listener` inner interface.
-  class Listener {
-   public:
-    virtual ~Listener() = default;
+  // Completion outcomes used by SlotGuard to notify the limiter.
+  enum class CompletionStatus { kSuccess, kIgnored, kDropped };
 
-    Listener() = default;
-    Listener(Listener const&) = delete;
-    Listener& operator=(Listener const&) = delete;
-    Listener(Listener&&) = delete;
-    Listener& operator=(Listener&&) = delete;
-
-    // The wrapped unit of work completed normally. Releases the
-    // in-flight slot and feeds a successful sample to the wrapped
-    // algorithm.
-    virtual void OnSuccess() = 0;
-
-    // The wrapped unit of work completed but should not be treated
-    // as a real signal of system health (a duplicate retry, a
-    // cancellation, an early bail-out). Releases the in-flight slot
-    // without feeding a sample.
-    virtual void OnIgnore() = 0;
-
-    // The wrapped unit of work was dropped by the downstream system
-    // (timed out, rejected by a load-shedder lower in the stack).
-    // Releases the in-flight slot and feeds a `did_drop=true` sample
-    // to the wrapped algorithm.
-    virtual void OnDropped() = 0;
-  };
+  class SlotGuard;
 
   Limiter() = default;
   virtual ~Limiter() = default;
@@ -84,12 +63,119 @@ class Limiter {
   Limiter& operator=(Limiter&&) = delete;
 
   // Attempts to acquire admission for one unit of work. Returns a
-  // non-null Listener on admission or null on rejection. The caller
+  // SlotGuard on admission or std::nullopt on rejection. The caller
   // must invoke exactly one completion method on the returned
-  // Listener.
-  virtual std::unique_ptr<Listener> TryAcquire(
+  // SlotGuard (or rely on the destructor default of OnIgnore).
+  virtual std::optional<SlotGuard> TryAcquire(
       std::string_view context = {}) = 0;
+
+ protected:
+  // Called by SlotGuard on completion (either an explicit
+  // On{Success,Ignore,Dropped} method invocation or the
+  // destructor default). Implementations decrement the in-flight
+  // counter, increment the appropriate outcome counter, and feed
+  // a sample to the wrapped algorithm where appropriate.
+  virtual void OnSlotComplete(CompletionStatus status, int64_t start_time_ns,
+                              int inflight_at_acquire, bool bypassed) = 0;
+
+  // Factory used by Limiter implementations to construct a
+  // SlotGuard. The SlotGuard's constructor is private and only
+  // Limiter is a friend; routing all construction through this
+  // static factory keeps the access-control surface small (one
+  // friend declaration on SlotGuard, no per-subclass friending)
+  // and gives every derived class a single, named entry point.
+  static SlotGuard MakeSlot(Limiter* limiter, int64_t start_time_ns,
+                            int inflight_at_acquire, bool bypassed);
 };
+
+// Move-only RAII guard returned by TryAcquire on admission.
+class Limiter::SlotGuard {
+ public:
+  ~SlotGuard() {
+    if (limiter_ != nullptr && !completed_) {
+      limiter_->OnSlotComplete(CompletionStatus::kIgnored, start_time_ns_,
+                               inflight_at_acquire_, bypassed_);
+    }
+  }
+
+  SlotGuard(SlotGuard const&) = delete;
+  SlotGuard& operator=(SlotGuard const&) = delete;
+
+  SlotGuard(SlotGuard&& other) noexcept
+      : limiter_(other.limiter_),
+        start_time_ns_(other.start_time_ns_),
+        inflight_at_acquire_(other.inflight_at_acquire_),
+        bypassed_(other.bypassed_),
+        completed_(other.completed_) {
+    other.limiter_ = nullptr;
+  }
+
+  SlotGuard& operator=(SlotGuard&& other) noexcept {
+    if (this != &other) {
+      if (limiter_ != nullptr && !completed_) {
+        limiter_->OnSlotComplete(CompletionStatus::kIgnored, start_time_ns_,
+                                 inflight_at_acquire_, bypassed_);
+      }
+      limiter_ = other.limiter_;
+      start_time_ns_ = other.start_time_ns_;
+      inflight_at_acquire_ = other.inflight_at_acquire_;
+      bypassed_ = other.bypassed_;
+      completed_ = other.completed_;
+      other.limiter_ = nullptr;
+    }
+    return *this;
+  }
+
+  // The wrapped unit of work completed normally. Releases the
+  // in-flight slot and feeds a successful sample to the wrapped
+  // algorithm. Idempotent: subsequent calls are no-ops.
+  void OnSuccess() { Complete(CompletionStatus::kSuccess); }
+
+  // The wrapped unit of work completed but should not be treated
+  // as a real signal of system health (a duplicate retry, a
+  // cancellation, an early bail-out). Releases the in-flight slot
+  // without feeding a sample.
+  void OnIgnore() { Complete(CompletionStatus::kIgnored); }
+
+  // The wrapped unit of work was dropped by the downstream system
+  // (timed out, rejected by a load-shedder lower in the stack).
+  // Releases the in-flight slot and feeds a `did_drop=true` sample
+  // to the wrapped algorithm.
+  void OnDropped() { Complete(CompletionStatus::kDropped); }
+
+ private:
+  friend class Limiter;
+
+  SlotGuard(Limiter* limiter, int64_t start_time_ns, int inflight_at_acquire,
+            bool bypassed)
+      : limiter_(limiter),
+        start_time_ns_(start_time_ns),
+        inflight_at_acquire_(inflight_at_acquire),
+        bypassed_(bypassed),
+        completed_(false) {}
+
+  void Complete(CompletionStatus status) {
+    if (limiter_ == nullptr || completed_) {
+      return;
+    }
+    limiter_->OnSlotComplete(status, start_time_ns_, inflight_at_acquire_,
+                             bypassed_);
+    completed_ = true;
+  }
+
+  Limiter* limiter_;
+  int64_t start_time_ns_;
+  int inflight_at_acquire_;
+  bool bypassed_;
+  bool completed_;
+};
+
+inline Limiter::SlotGuard Limiter::MakeSlot(Limiter* limiter,
+                                            int64_t start_time_ns,
+                                            int inflight_at_acquire,
+                                            bool bypassed) {
+  return SlotGuard{limiter, start_time_ns, inflight_at_acquire, bypassed};
+}
 
 }  // namespace limen
 

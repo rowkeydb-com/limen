@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -51,11 +52,12 @@ namespace limen {
 // Concrete subclasses implement `DoAcquire`, which decides whether
 // to admit a non-bypass call. The base class's `TryAcquire`
 // handles the bypass branch, the counter bookkeeping, and the
-// Listener construction; subclasses only own the gate-check policy.
+// SlotGuard construction; subclasses only own the gate-check
+// policy.
 //
 // Ported from Netflix's `AbstractLimiter.java`. Concrete subclass
-// `SimpleLimiter` (lands in commit 6) implements a compare-and-swap
-// gate on the in-flight atomic.
+// `SimpleLimiter` implements a compare-and-swap gate on the
+// in-flight atomic.
 class AbstractLimiter : public Limiter {
  public:
   // Five mutually-exclusive outcomes for one admission decision.
@@ -73,7 +75,7 @@ class AbstractLimiter : public Limiter {
 
   using BypassPredicate = std::function<bool(std::string_view context)>;
 
-  std::unique_ptr<Listener> TryAcquire(std::string_view context = {}) final;
+  std::optional<SlotGuard> TryAcquire(std::string_view context = {}) final;
 
   // Wait-free reads of the limiter's current state. Safe to call
   // from any thread without coordination.
@@ -96,29 +98,32 @@ class AbstractLimiter : public Limiter {
 
   explicit AbstractLimiter(Params params);
 
-  // Subclasses implement the per-call admission gate. Returning
-  // true admits and the base class produces a Listener; returning
-  // false rejects (the base class increments the rejected counter
-  // and returns null). The base implementation admits
-  // unconditionally — useful for tests that only need to exercise
-  // the listener machinery.
-  virtual bool DoAcquire(std::string_view context);
+  // Subclasses implement the per-call admission gate. On admission,
+  // the override must atomically reserve a slot — that is, leave
+  // the in-flight counter incremented by exactly one — and return
+  // the post-increment value. On rejection, return std::nullopt
+  // without touching the counter. The base implementation admits
+  // unconditionally with a plain fetch_add, which is useful for
+  // tests that only need to exercise the bookkeeping machinery.
+  // SimpleLimiter overrides this with a compare-and-swap loop
+  // that checks the in-flight value against the cap before
+  // committing the increment.
+  virtual std::optional<int> DoAcquire(std::string_view context);
 
-  // Called by the per-call Listener when the work completes. The
-  // base class decrements the in-flight counter, increments the
+  // Hook called by the SlotGuard on completion. Decrements
+  // in-flight (for non-bypass calls), increments the appropriate
   // outcome counter, and feeds a sample to the wrapped algorithm
-  // when the outcome warrants one. Bypass listeners never call
-  // this method — they are accounted for at acquire time.
-  void RecordOutcome(Status status, int64_t start_time_ns,
-                     int inflight_at_acquire);
+  // when the outcome warrants one. Bypass calls already had their
+  // counter incremented at acquire time; the bypass SlotGuard's
+  // completion is a no-op for accounting purposes.
+  void OnSlotComplete(CompletionStatus status, int64_t start_time_ns,
+                      int inflight_at_acquire, bool bypassed) final;
+
+  // In-flight atomic. Exposed to subclasses so they can implement
+  // their own compare-and-swap-based admission gate against it.
+  std::atomic<int> inflight_{0};
 
  private:
-  // Two private Listener implementations defined in the .cc. As
-  // nested classes they have full access to the enclosing class's
-  // protected `RecordOutcome` method without a friend declaration.
-  class CallListener;
-  class BypassListener;
-
   void RegisterObservableInstruments();
   static void ObserveLimit(opentelemetry::metrics::ObserverResult result,
                            void* state) noexcept;
@@ -132,7 +137,6 @@ class AbstractLimiter : public Limiter {
   BypassPredicate bypass_predicate_;
   std::shared_ptr<opentelemetry::sdk::metrics::MeterProvider> meter_provider_;
 
-  std::atomic<int> inflight_{0};
   // One counter per Status value. Indexed by static_cast<int>(status).
   std::atomic<int64_t> outcome_counts_[kStatusCount] = {};
 

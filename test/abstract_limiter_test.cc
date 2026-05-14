@@ -112,7 +112,9 @@ class RejectingLimiter : public AbstractLimiter {
   }
 
  protected:
-  bool DoAcquire(std::string_view /*context*/) override { return false; }
+  std::optional<int> DoAcquire(std::string_view /*context*/) override {
+    return std::nullopt;
+  }
 
  private:
   explicit RejectingLimiter(Params params)
@@ -302,9 +304,9 @@ TEST(AbstractLimiterTest, ObservableUpDownCounterReturnsLiveInflight) {
   auto a = limiter->TryAcquire();
   auto b = limiter->TryAcquire();
   auto c = limiter->TryAcquire();
-  ASSERT_NE(a, nullptr);
-  ASSERT_NE(b, nullptr);
-  ASSERT_NE(c, nullptr);
+  ASSERT_TRUE(a);
+  ASSERT_TRUE(b);
+  ASSERT_TRUE(c);
 
   h.reader->Collect();
   auto points = Int64PointsFor(*h.exporter, "limen.inflight");
@@ -329,23 +331,23 @@ TEST(AbstractLimiterTest, ObservableCounterEnumeratesAllStatuses) {
 
   // One success.
   auto s = limiter->TryAcquire();
-  ASSERT_NE(s, nullptr);
+  ASSERT_TRUE(s);
   s->OnSuccess();
 
   // One ignored.
   auto i = limiter->TryAcquire();
-  ASSERT_NE(i, nullptr);
+  ASSERT_TRUE(i);
   i->OnIgnore();
 
   // One dropped.
   auto d = limiter->TryAcquire();
-  ASSERT_NE(d, nullptr);
+  ASSERT_TRUE(d);
   d->OnDropped();
 
   // One bypassed (admitted via bypass predicate, completed
   // successfully).
   auto b = limiter->TryAcquire("bypass");
-  ASSERT_NE(b, nullptr);
+  ASSERT_TRUE(b);
   b->OnSuccess();
 
   // The base limiter admits unconditionally, so a "rejected"
@@ -355,7 +357,7 @@ TEST(AbstractLimiterTest, ObservableCounterEnumeratesAllStatuses) {
   auto rejecting = RejectingLimiter::Create(std::move(rejecting_wrapped),
                                             "reject", h.provider);
   auto r = rejecting->TryAcquire();
-  EXPECT_EQ(r, nullptr);
+  EXPECT_FALSE(r);
 
   h.reader->Collect();
   // "rejected" is owned by the RejectingLimiter's MeterProvider
@@ -394,7 +396,7 @@ TEST(AbstractLimiterTest,
 
   EXPECT_EQ(limiter->InflightCount(), 0);
   auto listener = limiter->TryAcquire("skip");
-  ASSERT_NE(listener, nullptr);
+  ASSERT_TRUE(listener);
   EXPECT_EQ(limiter->InflightCount(), 0)
       << "Bypass must not touch the in-flight counter";
   listener->OnSuccess();
@@ -412,7 +414,7 @@ TEST(AbstractLimiterTest, ListenerOnSuccessReleasesAndCounts) {
   auto limiter = TestLimiter::Create(std::move(wrapped), "test");
 
   auto listener = limiter->TryAcquire();
-  ASSERT_NE(listener, nullptr);
+  ASSERT_TRUE(listener);
   EXPECT_EQ(limiter->InflightCount(), 1);
   listener->OnSuccess();
   EXPECT_EQ(limiter->InflightCount(), 0);
@@ -428,7 +430,7 @@ TEST(AbstractLimiterTest, ListenerOnIgnoreReleasesWithoutSample) {
   auto limiter = TestLimiter::Create(std::move(wrapped), "test");
 
   auto listener = limiter->TryAcquire();
-  ASSERT_NE(listener, nullptr);
+  ASSERT_TRUE(listener);
   EXPECT_EQ(limiter->InflightCount(), 1);
   listener->OnIgnore();
   EXPECT_EQ(limiter->InflightCount(), 0);
@@ -442,7 +444,7 @@ TEST(AbstractLimiterTest, ListenerOnDroppedReleasesAndCounts) {
   auto limiter = TestLimiter::Create(std::move(wrapped), "test");
 
   auto listener = limiter->TryAcquire();
-  ASSERT_NE(listener, nullptr);
+  ASSERT_TRUE(listener);
   EXPECT_EQ(limiter->InflightCount(), 1);
   listener->OnDropped();
   EXPECT_EQ(limiter->InflightCount(), 0);
@@ -451,17 +453,15 @@ TEST(AbstractLimiterTest, ListenerOnDroppedReleasesAndCounts) {
   EXPECT_TRUE(recorder->last_did_drop);
 }
 
-TEST(AbstractLimiterTest, OnlyListenerAllocatesOnHotPath) {
-  // The design's claim is that the per-request acquire / complete
-  // path makes no synchronous OpenTelemetry SDK call. This test
-  // verifies a strict proxy: heap allocations during a tight
-  // acquire / OnSuccess loop with the observable instruments fully
-  // wired up. Each acquire allocates exactly one Listener; any
-  // synchronous SDK call would inflate the count above that
-  // floor. The proxy is sufficient because the OTel SDK's
-  // synchronous instrument-record paths heap-allocate aggregator
-  // state on first observation of an attribute set, so a single
-  // additional allocation would be visible.
+TEST(AbstractLimiterTest, NoAllocationOnHotPath) {
+  // The per-request acquire and complete path is allocation-free
+  // by design. TryAcquire returns a SlotGuard by value through
+  // std::optional, so the slot lives on the caller's stack with
+  // no heap involvement. The observable instruments are
+  // registered at construction; their callbacks fire only when
+  // the SDK's collection thread polls them, not from a request
+  // thread. Drive a tight acquire / OnSuccess loop and assert
+  // zero heap allocations across the run.
   OtelHarness h;
   auto limiter =
       TestLimiter::Create(std::make_unique<RecordingLimit>(50), "otel",
@@ -472,15 +472,12 @@ TEST(AbstractLimiterTest, OnlyListenerAllocatesOnHotPath) {
   g_alloc_tracking.store(true, std::memory_order_relaxed);
   for (int i = 0; i < kIterations; ++i) {
     auto l = limiter->TryAcquire();
-    ASSERT_NE(l, nullptr);
+    ASSERT_TRUE(l);
     l->OnSuccess();
   }
   g_alloc_tracking.store(false, std::memory_order_relaxed);
 
-  // Exactly one allocation per acquire: the Listener itself. Any
-  // additional allocation would mean the SDK was called
-  // synchronously on the request path.
-  EXPECT_EQ(g_alloc_count.load(std::memory_order_relaxed), kIterations);
+  EXPECT_EQ(g_alloc_count.load(std::memory_order_relaxed), 0);
 }
 
 }  // namespace
