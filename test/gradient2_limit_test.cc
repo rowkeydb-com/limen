@@ -188,11 +188,17 @@ TEST(Gradient2LimitTest, LatencySpikeShrinks) {
 }
 
 TEST(Gradient2LimitTest, RecoveryShrinksLongRtt) {
+  // Pin the additive-increase term to the constant Netflix default
+  // of 4. The Limen default `ceil(sqrt(current_limit))` would
+  // drive the cap to MaxConcurrency=200 within the 100 spike
+  // samples below, leaving no headroom for the recovery phase to
+  // grow into and turning the assertion vacuous.
   auto limit = Gradient2Limit::Builder()
                    .InitialLimit(50)
                    .MinLimit(1)
                    .MaxConcurrency(200)
                    .LongWindow(50)
+                   .QueueSize(4)
                    .Build();
 
   // Pull the long-term RTT up with a sustained spike.
@@ -475,6 +481,172 @@ TEST(Gradient2LimitTest, ZeroRttSampleDoesNotRecord) {
   EXPECT_EQ(FindHistogramPoint(*exporter, "limen.min_rtt"), nullptr);
   EXPECT_EQ(FindHistogramPoint(*exporter, "limen.min_window_rtt"), nullptr);
   EXPECT_EQ(FindHistogramPoint(*exporter, "limen.queue_size"), nullptr);
+}
+
+TEST(Gradient2LimitTest, DefaultSqrtQueueSizeReturnsCeilOfSqrt) {
+  // The Builder's default additive-increase callable is exposed
+  // for direct testing. Pin the contract.
+  EXPECT_EQ(Gradient2Limit::DefaultSqrtQueueSize(0), 1)
+      << "Floor at 1 even when the cap is 0 (an unreachable runtime "
+         "state, but we promise the function does not return 0)";
+  EXPECT_EQ(Gradient2Limit::DefaultSqrtQueueSize(1), 1);
+  EXPECT_EQ(Gradient2Limit::DefaultSqrtQueueSize(4), 2);
+  // ceil(sqrt(5)) = ceil(2.236) = 3.
+  EXPECT_EQ(Gradient2Limit::DefaultSqrtQueueSize(5), 3);
+  EXPECT_EQ(Gradient2Limit::DefaultSqrtQueueSize(100), 10);
+  // ceil(sqrt(101)) = ceil(10.05) = 11.
+  EXPECT_EQ(Gradient2Limit::DefaultSqrtQueueSize(101), 11);
+  EXPECT_EQ(Gradient2Limit::DefaultSqrtQueueSize(10000), 100);
+  EXPECT_EQ(Gradient2Limit::DefaultSqrtQueueSize(1'000'000), 1000);
+}
+
+TEST(Gradient2LimitTest, DefaultBuilderUsesSqrtQueueSize) {
+  // Without calling `.QueueSize()`, the Builder installs the sqrt
+  // default. Pin behaviour at one sample window: with cap=100 and
+  // gradient=1.0 (short_rtt == long_rtt after warmup), the raw
+  // new_limit is `100 * 1.0 + sqrt(100) = 110`. Smoothed against
+  // the previous 100 at 0.2: `100 * 0.8 + 110 * 0.2 = 102`. The
+  // first call against a freshly-built limiter triggers warmup,
+  // so we run the warmup window before measuring.
+  auto limit = Gradient2Limit::Builder()
+                   .InitialLimit(100)
+                   .MinLimit(1)
+                   .MaxConcurrency(1000)
+                   .Build();
+
+  // Warmup: 10 identical samples settle the long-term EWMA at
+  // 1ms. Each one in steady state with gradient=1.0 grows the
+  // cap by ~ceil(sqrt(cap)) * smoothing each window.
+  int const start = limit->GetLimit();
+  for (int i = 0; i < 10; ++i) {
+    limit->OnSample(0, 1'000'000, limit->GetLimit(), false);
+  }
+  int const after_warmup = limit->GetLimit();
+  EXPECT_GT(after_warmup, start)
+      << "Cap must grow during warmup with sqrt-default queue_size. start="
+      << start << " after=" << after_warmup;
+
+  // Drive 50 more windows. The cap continues to grow but the
+  // per-window addition scales with sqrt(current). Eventually
+  // the cap reaches MaxConcurrency=1000.
+  bool reached_ceiling = false;
+  for (int i = 0; i < 5000 && !reached_ceiling; ++i) {
+    limit->OnSample(0, 1'000'000, limit->GetLimit(), false);
+    if (limit->GetLimit() == 1000) reached_ceiling = true;
+  }
+  EXPECT_TRUE(reached_ceiling)
+      << "Sqrt-default growth must reach MaxConcurrency=1000 within "
+         "the budget. final="
+      << limit->GetLimit();
+}
+
+TEST(Gradient2LimitTest, FunctionalBuilderOverloadInvokedWithCurrentCap) {
+  // Pass a custom QueueSizeFn that records every cap it is invoked
+  // with. The Update() path must call the function once per
+  // gradient-branch sample. Single-threaded driving so the
+  // recorded sequence is deterministic.
+  std::vector<int> seen_caps;
+  auto recording_fn = [&seen_caps](int cap) {
+    seen_caps.push_back(cap);
+    return 4;  // constant burst, so behaviour matches Netflix default
+  };
+
+  auto limit = Gradient2Limit::Builder()
+                   .InitialLimit(50)
+                   .MinLimit(1)
+                   .MaxConcurrency(200)
+                   .QueueSize(Gradient2Limit::QueueSizeFn(recording_fn))
+                   .Build();
+
+  for (int i = 0; i < 5; ++i) {
+    limit->OnSample(0, 1'000'000, limit->GetLimit(), false);
+  }
+
+  EXPECT_EQ(static_cast<int>(seen_caps.size()), 5)
+      << "Functional QueueSize must be invoked once per Update call.";
+  // The first invocation receives the InitialLimit=50; subsequent
+  // invocations receive the previous window's smoothed cap.
+  EXPECT_EQ(seen_caps[0], 50);
+  // The sequence is monotone non-decreasing in this single-RTT
+  // steady-state regime (gradient stays at 1.0, the constant-4
+  // term grows the cap each window). Any regression that passes
+  // a stale or wrong cap value into the callable shows up here.
+  for (int i = 1; i < static_cast<int>(seen_caps.size()); ++i) {
+    EXPECT_GE(seen_caps[i], seen_caps[i - 1])
+        << "Cap passed to the callable must be monotone non-decreasing "
+           "in steady state. seen_caps["
+        << i << "]=" << seen_caps[i] << " seen_caps[" << i - 1
+        << "]=" << seen_caps[i - 1];
+  }
+}
+
+TEST(Gradient2LimitTest, EmptyQueueSizeFnFallsBackToDefaultSqrt) {
+  // A library does not crash the host process on user-supplied
+  // input. The Builder defensively replaces an empty
+  // `QueueSizeFn` (default-constructed `std::function`, or one
+  // wrapping a null function pointer) with the sqrt default so a
+  // first `OnSample` call cannot trigger
+  // `std::__throw_bad_function_call` / `std::terminate` under
+  // `-fno-exceptions`.
+  auto limit_empty = Gradient2Limit::Builder()
+                         .InitialLimit(50)
+                         .MinLimit(1)
+                         .MaxConcurrency(200)
+                         .QueueSize(Gradient2Limit::QueueSizeFn{})
+                         .Build();
+  auto limit_default = Gradient2Limit::Builder()
+                           .InitialLimit(50)
+                           .MinLimit(1)
+                           .MaxConcurrency(200)
+                           .Build();
+
+  // Drive both identically window-by-window. The first iteration
+  // proves limit_empty does not terminate the host on a sample
+  // with non-zero RTT (which would call the underlying function
+  // for the first time). Every iteration's equality assertion
+  // proves the empty-fn substitution is the same default that
+  // applies when QueueSize is not specified at all.
+  for (int i = 0; i < 20; ++i) {
+    limit_empty->OnSample(0, 1'000'000, limit_empty->GetLimit(), false);
+    limit_default->OnSample(0, 1'000'000, limit_default->GetLimit(), false);
+    EXPECT_EQ(limit_empty->GetLimit(), limit_default->GetLimit())
+        << "Empty-fn limiter must mirror default-limiter trajectory "
+           "exactly. window="
+        << i;
+  }
+  EXPECT_GT(limit_empty->GetLimit(), 50)
+      << "Cap must grow over 20 windows of identical RTT samples";
+}
+
+TEST(Gradient2LimitTest, ConstantQueueSizeBuilderShortcutPreservesBehaviour) {
+  // The int-overload `.QueueSize(4)` must produce identical
+  // behaviour to passing a constant-valued QueueSizeFn. Pin the
+  // contract by driving both limiters with the same sample
+  // sequence and comparing per-window caps.
+  auto const_int = Gradient2Limit::Builder()
+                       .InitialLimit(50)
+                       .MinLimit(1)
+                       .MaxConcurrency(200)
+                       .QueueSize(4)
+                       .Build();
+  auto const_fn =
+      Gradient2Limit::Builder()
+          .InitialLimit(50)
+          .MinLimit(1)
+          .MaxConcurrency(200)
+          .QueueSize(Gradient2Limit::QueueSizeFn([](int) { return 4; }))
+          .Build();
+
+  for (int i = 0; i < 100; ++i) {
+    int64_t const rtt = 1'000'000 + static_cast<int64_t>(i % 5) * 100'000;
+    int const inflight = const_int->GetLimit();
+    const_int->OnSample(0, rtt, inflight, false);
+    const_fn->OnSample(0, rtt, const_fn->GetLimit(), false);
+    EXPECT_EQ(const_int->GetLimit(), const_fn->GetLimit())
+        << "Constant-int and constant-fn overloads must produce identical "
+           "cap evolution. window="
+        << i;
+  }
 }
 
 }  // namespace

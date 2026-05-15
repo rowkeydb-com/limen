@@ -21,6 +21,7 @@
 #include "opentelemetry/metrics/sync_instruments.h"
 #include "opentelemetry/sdk/metrics/meter_provider.h"
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -44,6 +45,17 @@ namespace limen {
 //   zero and the resulting unbounded gradient. This is a Limen-side
 //   correctness fix, not an upstream port.
 //
+// The additive-increase amount the algorithm adds to the cap each
+// window is supplied by a callable, `QueueSizeFn`, of the current
+// cap. Upstream Java's `Gradient2Limit` carries the same shape
+// (`Function<Integer, Integer> queueSize`); the upstream default is
+// the constant `4`. Limen's default is `ceil(sqrt(current_limit))`
+// (floored at 1), which scales the probe rate sublinearly with cap
+// — at cap=100 the probe is ~10 per window; at cap=10000 it is
+// ~100. Constant-burst behaviour remains available through the
+// `QueueSize(int)` builder overload, which the constant-form
+// upstream default uses.
+//
 // Construction goes through the inner `Builder` class. The builder
 // also accepts an OpenTelemetry SDK MeterProvider; if one is
 // supplied, the limiter registers three histograms with sane default
@@ -59,6 +71,10 @@ namespace limen {
 // Ported from Netflix's `Gradient2Limit.java`.
 class Gradient2Limit final : public AbstractLimit {
  public:
+  // Callable that computes the additive-increase amount from the
+  // current cap. Invoked once per window-update call.
+  using QueueSizeFn = std::function<int(int /*current_limit*/)>;
+
   class Builder {
    public:
     Builder() = default;
@@ -83,10 +99,37 @@ class Gradient2Limit final : public AbstractLimit {
       return *this;
     }
 
-    // Additive-increase amount when the gradient says "we have
-    // headroom". Default 4.
+    // Constant additive-increase amount per window. Matches Netflix
+    // upstream's `Gradient2Limit.Builder.queueSize(int)` shortcut
+    // and the upstream default of `4`. Stored as the constant-
+    // valued function `[v](int) { return v; }`.
     Builder& QueueSize(int v) {
-      queue_size_ = v;
+      queue_size_fn_ = [v](int /*cap*/) { return v; };
+      return *this;
+    }
+
+    // Functional additive-increase amount per window: a callable
+    // from the current cap to the burst term used in
+    // `new_limit = current_limit * gradient + QueueSize(current_limit)`.
+    // The default if neither overload is called is
+    // `ceil(sqrt(current_limit))`, floored at 1 — a sublinear probe
+    // rate that scales naturally with server capacity (~10% at
+    // cap=100, ~1% at cap=10000).
+    //
+    // Concurrent `OnSample` calls against one limiter serialise
+    // through the limiter's internal mutex, so the callable is
+    // never invoked concurrently against the same limiter. A
+    // stateful callable that touches shared state outside the
+    // limiter remains the caller's responsibility.
+    //
+    // A default-constructed or `nullptr`-wrapping `QueueSizeFn`
+    // would normally throw on first invocation; with
+    // `-fno-exceptions` that becomes `std::terminate`. A library
+    // does not crash the host process on user-supplied input, so
+    // an empty function is replaced silently with the default
+    // (`DefaultSqrtQueueSize`).
+    Builder& QueueSize(QueueSizeFn fn) {
+      queue_size_fn_ = fn ? std::move(fn) : QueueSizeFn(DefaultSqrtQueueSize);
       return *this;
     }
 
@@ -145,13 +188,21 @@ class Gradient2Limit final : public AbstractLimit {
     int initial_limit_ = 20;
     int min_limit_ = 20;
     int max_concurrency_ = 200;
-    int queue_size_ = 4;
+    // Default sublinear probe: at cap=100 ⇒ 10 (10% probe), at
+    // cap=10000 ⇒ 100 (1% probe). Floored at 1 so a cap of 0..1
+    // never produces a zero-valued additive-increase term.
+    QueueSizeFn queue_size_fn_ = DefaultSqrtQueueSize;
     double rtt_tolerance_ = 1.5;
     double smoothing_ = 0.2;
     int long_window_ = 600;
     std::string id_;
     std::shared_ptr<opentelemetry::sdk::metrics::MeterProvider> meter_provider_;
   };
+
+  // The Builder's default `QueueSizeFn`. Exposed publicly so tests
+  // and consumers can refer to the exact same function the Builder
+  // installs. Returns `max(1, ceil(sqrt(current_limit)))`.
+  static int DefaultSqrtQueueSize(int current_limit);
 
  protected:
   int Update(int64_t start_time_ns, int64_t rtt_ns, int inflight,
@@ -164,7 +215,7 @@ class Gradient2Limit final : public AbstractLimit {
     int initial_limit;
     int min_limit;
     int max_concurrency;
-    int queue_size;
+    QueueSizeFn queue_size_fn;
     double rtt_tolerance;
     double smoothing;
     int long_window;
@@ -187,7 +238,7 @@ class Gradient2Limit final : public AbstractLimit {
   // Configuration. Set once at construction; never mutated.
   int const min_limit_;
   int const max_limit_;
-  int const queue_size_constant_;
+  QueueSizeFn const queue_size_fn_;
   double const smoothing_;
   double const tolerance_;
   std::string const id_;

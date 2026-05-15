@@ -24,6 +24,7 @@
 #include "opentelemetry/sdk/metrics/view/meter_selector.h"
 #include "opentelemetry/sdk/metrics/view/view.h"
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -44,10 +45,11 @@ std::vector<double> LatencyBucketsNs() {
 }
 
 // Bucket boundaries for the queue-size histogram. Dimensionless
-// integer counts; the typical value is the configured `queue_size`
-// constant (default 4). The boundaries below cover both the static
-// constant case and the dynamic queue-size functions Netflix's
-// upstream supports.
+// integer counts. The Limen default `QueueSizeFn` is
+// `ceil(sqrt(current_limit))`, so the value scales with the cap;
+// the constant-form `.QueueSize(int)` shortcut stays in the lower
+// buckets. The boundaries cover both ranges plus the larger probe
+// values the functional API permits.
 std::vector<double> QueueSizeBuckets() {
   return {1.0, 4.0, 10.0, 50.0, 100.0, 500.0, 1000.0};
 }
@@ -81,12 +83,22 @@ void RegisterHistogramView(sdk_metrics::MeterProvider& provider,
 
 }  // namespace
 
+int Gradient2Limit::DefaultSqrtQueueSize(int current_limit) {
+  // `ceil(sqrt(current_limit))`, floored at 1. The floor matters
+  // only at `current_limit == 0`, an unreachable state given the
+  // MinLimit clamp in `Update`, but it costs nothing and removes
+  // the edge case from this function's contract.
+  double const root =
+      std::sqrt(static_cast<double>(std::max(0, current_limit)));
+  return std::max(1, static_cast<int>(std::ceil(root)));
+}
+
 std::unique_ptr<Gradient2Limit> Gradient2Limit::Builder::Build() {
   // Copy out of the Builder rather than moving, so a second `Build()`
   // call on the same Builder yields an identically-configured second
   // limiter rather than one with an empty id and a null MeterProvider.
   Params params{
-      initial_limit_,  min_limit_, max_concurrency_, queue_size_,
+      initial_limit_,  min_limit_, max_concurrency_, queue_size_fn_,
       rtt_tolerance_,  smoothing_, long_window_,     id_,
       meter_provider_,
   };
@@ -103,7 +115,7 @@ Gradient2Limit::Gradient2Limit(Params params)
       long_rtt_(params.long_window, /*warmup_window=*/10),
       min_limit_(params.min_limit),
       max_limit_(params.max_concurrency),
-      queue_size_constant_(params.queue_size),
+      queue_size_fn_(std::move(params.queue_size_fn)),
       smoothing_(params.smoothing),
       tolerance_(params.rtt_tolerance),
       id_(std::move(params.id)) {
@@ -123,8 +135,8 @@ Gradient2Limit::Gradient2Limit(Params params)
                         LatencyBucketsNs());
   RegisterHistogramView(
       *params.meter_provider, "limen.queue_size",
-      "Algorithm queue-size constant (additive-increase amount), per window.",
-      "1", QueueSizeBuckets());
+      "Algorithm queue-size term (additive-increase amount), per window.", "1",
+      QueueSizeBuckets());
 
   auto meter = params.meter_provider->GetMeter(AbstractLimiter::kMeterName,
                                                /*version=*/"", /*schema=*/"");
@@ -135,8 +147,7 @@ Gradient2Limit::Gradient2Limit(Params params)
       "ns");
   queue_size_hist_ = meter->CreateDoubleHistogram(
       "limen.queue_size",
-      "Algorithm queue-size constant (additive-increase amount), per window.",
-      "1");
+      "Algorithm queue-size term (additive-increase amount), per window.", "1");
 }
 
 int Gradient2Limit::Update(int64_t /*start_time_ns*/, int64_t rtt_ns,
@@ -153,7 +164,11 @@ int Gradient2Limit::Update(int64_t /*start_time_ns*/, int64_t rtt_ns,
 
   double const short_rtt = static_cast<double>(rtt_ns);
   double const long_rtt = long_rtt_.Add(short_rtt);
-  double const queue_size = static_cast<double>(queue_size_constant_);
+  // The additive-increase term is evaluated against the current
+  // cap. Constant-form callables ignore the argument; the default
+  // sqrt form scales the probe rate sublinearly with cap size.
+  double const queue_size =
+      static_cast<double>(queue_size_fn_(static_cast<int>(estimated_limit_)));
 
   RecordHistograms(short_rtt, long_rtt, queue_size);
 
