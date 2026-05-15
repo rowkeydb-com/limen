@@ -64,6 +64,15 @@ jobs:
           flags: unittests
           name: limen-coverage
           fail_ci_if_error: false
+          # Disable the default plugins (gcov auto-discovery, etc.).
+          # Bazel produces the combined lcov in `coverage.lcov` and
+          # the action's gcov plugin otherwise walks `.gcno` files
+          # in `.cache/bazel/.../sandbox/...` whose corresponding
+          # `coverage.dat` files have been cleaned up by the test
+          # runner, crashing with FileNotFoundError. With noop we
+          # upload only the explicit lcov file.
+          plugins: noop
+          disable_search: true
 
       - name: Upload HTML report
         if: ${{ hashFiles('coverage_html/**') != '' }}
