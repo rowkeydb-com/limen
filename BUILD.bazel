@@ -194,3 +194,12 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "traffic_simulation_test",
+    srcs = ["test/traffic_simulation_test.cc"],
+    deps = [
+        ":limen",
+        "@googletest//:gtest_main",
+    ],
+)
