@@ -1,5 +1,11 @@
 # Limen
 
+[![Static Analysis](https://github.com/rowkeydb-com/limen/actions/workflows/static-analysis.yml/badge.svg)](https://github.com/rowkeydb-com/limen/actions/workflows/static-analysis.yml)
+[![Build and Test](https://github.com/rowkeydb-com/limen/actions/workflows/build-test.yml/badge.svg)](https://github.com/rowkeydb-com/limen/actions/workflows/build-test.yml)
+[![Sanitizers](https://github.com/rowkeydb-com/limen/actions/workflows/sanitizers.yml/badge.svg)](https://github.com/rowkeydb-com/limen/actions/workflows/sanitizers.yml)
+[![Code Coverage](https://github.com/rowkeydb-com/limen/actions/workflows/coverage.yml/badge.svg)](https://github.com/rowkeydb-com/limen/actions/workflows/coverage.yml)
+[![codecov](https://codecov.io/gh/rowkeydb-com/limen/branch/main/graph/badge.svg)](https://app.codecov.io/gh/rowkeydb-com/limen)
+
 **Limen is an idiomatic C++20 port of
 [Netflix's `concurrency-limits`](https://github.com/Netflix/concurrency-limits)**
 — a production-tested adaptive concurrency limiter that protects a

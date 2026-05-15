@@ -63,7 +63,11 @@ jobs:
           files: ./coverage.lcov
           flags: unittests
           name: limen-coverage
-          fail_ci_if_error: false
+          # Surface upload failures as CI failures. Previously
+          # false to avoid masking unrelated issues during setup;
+          # now that the integration is working, silent upload
+          # failures must not pass.
+          fail_ci_if_error: true
           # Disable the default plugins (gcov auto-discovery, etc.).
           # Bazel produces the combined lcov in `coverage.lcov` and
           # the action's gcov plugin otherwise walks `.gcno` files
