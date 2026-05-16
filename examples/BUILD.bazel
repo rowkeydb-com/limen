@@ -1,0 +1,15 @@
+# Compilable examples for Limen consumers. Each example is a small,
+# self-contained `cc_binary` that demonstrates one slice of the API.
+# `bazel build //examples:quickstart` builds the README quickstart in
+# runnable form.
+
+package(default_visibility = ["//visibility:public"])
+
+cc_binary(
+    name = "quickstart",
+    srcs = ["quickstart.cc"],
+    deps = [
+        "//:limen",
+        "@abseil-cpp//absl/time",
+    ],
+)

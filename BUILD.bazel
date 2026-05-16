@@ -1,8 +1,10 @@
 # Top-level Bazel package for Limen.
 #
-# `//:limen` is the core library — algorithms, limiters, measurements,
-# and observability wiring, with no gRPC dependency. The gRPC adapter
-# lands in commit 9 as a separate `//:limen_grpc` target.
+# `//:limen` is the single library target — algorithms, limiters, the
+# CoDel filter, and observability wiring. The library is transport-
+# agnostic; integrating it with an application-level RPC library is
+# the application's responsibility and is documented in the README
+# and design/architecture.md.
 
 package(default_visibility = ["//visibility:public"])
 

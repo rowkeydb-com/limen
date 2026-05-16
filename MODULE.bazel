@@ -5,7 +5,7 @@ See design/architecture.md for the full library overview.
 
 module(
     name = "limen",
-    version = "0.0.0-dev",
+    version = "0.1.0",
     compatibility_level = 1,
 )
 
@@ -13,7 +13,6 @@ module(
 # section of ai/commit-plan.md explains why we pin latest stable.
 bazel_dep(name = "abseil-cpp", version = "20260107.1")
 bazel_dep(name = "opentelemetry-cpp", version = "1.24.0.bcr.1")
-bazel_dep(name = "grpc", version = "1.80.0")
 bazel_dep(name = "rules_cc", version = "0.2.18")
 
 # Test-only dependency. GoogleTest is not visible to consumers.

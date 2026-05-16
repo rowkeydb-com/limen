@@ -36,8 +36,9 @@ namespace limen {
 // transient overshoot under contention.
 //
 // Construction goes through the inner Builder. SimpleLimiter is
-// the concrete limiter type the gRPC adapter and the blocking
-// decorators wrap by default.
+// the concrete limiter type the blocking decorators wrap by default
+// and the natural choice for applications wiring Limen onto an
+// application-level RPC library.
 //
 // Ported from Netflix's `SimpleLimiter.java`.
 class SimpleLimiter final : public AbstractLimiter {
