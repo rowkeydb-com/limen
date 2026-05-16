@@ -215,3 +215,13 @@ cc_test(
         "@opentelemetry-cpp//sdk/src/metrics",
     ],
 )
+
+cc_test(
+    name = "observability_e2e_test",
+    srcs = ["test/observability_e2e_test.cc"],
+    deps = [
+        ":limen",
+        "@googletest//:gtest_main",
+        "@opentelemetry-cpp//sdk/src/metrics",
+    ],
+)
