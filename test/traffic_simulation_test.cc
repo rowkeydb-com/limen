@@ -1171,8 +1171,16 @@ TEST(TrafficSimulationTest, BlockingLimiterAllWaitersDrainUnderTraffic) {
                      .Build()
                      .value();
 
-  constexpr int kThreads = 32;
-  constexpr int kIterationsPerThread = 50;
+  // 8 threads x 25 iterations = 200 acquire/release pairs through
+  // a cap-4 BlockingLimiter. Enough contention to exercise the
+  // drain (~50 waiter-handoffs per slot) but sized so the test
+  // fits well inside the default `small` bazel timeout even
+  // under ASan/TSan slowdown on a 2-core GitHub runner. Previous
+  // settings of 32x50 saw individual TryAcquire calls reach the
+  // limiter's 60s timeout under TSan oversubscription and the
+  // test ASSERT-failed at 1184.
+  constexpr int kThreads = 8;
+  constexpr int kIterationsPerThread = 25;
   std::latch start{kThreads};
   std::vector<std::thread> threads;
   threads.reserve(kThreads);
@@ -1215,8 +1223,12 @@ TEST(TrafficSimulationTest, LifoBlockingLimiterAllWaitersDrainUnderTraffic) {
                      .Build()
                      .value();
 
-  constexpr int kThreads = 32;
-  constexpr int kIterationsPerThread = 50;
+  // Same sizing rationale as BlockingLimiterAllWaitersDrainUnderTraffic
+  // above: enough contention to exercise the LIFO drain without
+  // blowing past the default `small` bazel timeout under
+  // sanitizer slowdown.
+  constexpr int kThreads = 8;
+  constexpr int kIterationsPerThread = 25;
   std::latch start{kThreads};
   std::vector<std::thread> threads;
   threads.reserve(kThreads);

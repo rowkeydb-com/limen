@@ -14,6 +14,7 @@ cc_library(
         "src/abstract_partitioned_limiter.cc",
         "src/average_sample_window.cc",
         "src/blocking_limiter.cc",
+        "src/codel_filter.cc",
         "src/exp_avg_measurement.cc",
         "src/gradient2_limit.cc",
         "src/lifo_blocking_limiter.cc",
@@ -28,6 +29,7 @@ cc_library(
         "include/limen/abstract_partitioned_limiter.h",
         "include/limen/average_sample_window.h",
         "include/limen/blocking_limiter.h",
+        "include/limen/codel_filter.h",
         "include/limen/exp_avg_measurement.h",
         "include/limen/fixed_limit.h",
         "include/limen/gradient2_limit.h",
@@ -201,5 +203,15 @@ cc_test(
     deps = [
         ":limen",
         "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "codel_filter_test",
+    srcs = ["test/codel_filter_test.cc"],
+    deps = [
+        ":limen",
+        "@googletest//:gtest_main",
+        "@opentelemetry-cpp//sdk/src/metrics",
     ],
 )
