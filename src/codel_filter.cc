@@ -81,7 +81,7 @@ CodelFilter::CodelFilter(PrivateTag, Params params)
 }
 
 bool CodelFilter::ShouldDrop(absl::Time enqueue_time) {
-  absl::MutexLock lock(mu_);
+  absl::MutexLock lock(&mu_);
   absl::Time const now = clock_();
   // Clock-skew clamp: enqueue_time in the future yields zero
   // sojourn rather than a negative duration. Defensive; the
@@ -164,7 +164,7 @@ absl::Time CodelFilter::ControlLaw(absl::Time t, uint32_t count) const {
 }
 
 bool CodelFilter::IsDropping() const {
-  absl::MutexLock lock(mu_);
+  absl::MutexLock lock(&mu_);
   return dropping_;
 }
 
@@ -173,12 +173,12 @@ int64_t CodelFilter::DropCount() const {
 }
 
 uint32_t CodelFilter::DropEpisodeCount() const {
-  absl::MutexLock lock(mu_);
+  absl::MutexLock lock(&mu_);
   return count_;
 }
 
 absl::Time CodelFilter::DropNext() const {
-  absl::MutexLock lock(mu_);
+  absl::MutexLock lock(&mu_);
   return drop_next_;
 }
 
@@ -213,7 +213,7 @@ void CodelFilter::ObserveDropping(opentelemetry::metrics::ObserverResult result,
   auto* self = static_cast<CodelFilter*>(state);
   int64_t value;
   {
-    absl::MutexLock lock(self->mu_);
+    absl::MutexLock lock(&self->mu_);
     value = self->dropping_ ? 1 : 0;
   }
   EmitObservation(result, value, {{"id", self->id_}});

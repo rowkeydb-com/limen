@@ -66,12 +66,12 @@ BlockingLimiter::BlockingLimiter(PrivateTag, std::unique_ptr<Limiter> delegate,
     : delegate_(std::move(delegate)), timeout_(timeout) {}
 
 int BlockingLimiter::QueueSize() const {
-  absl::MutexLock lock(mu_);
+  absl::MutexLock lock(&mu_);
   return static_cast<int>(queue_.size());
 }
 
 void BlockingLimiter::AwaitQueueSize(int n) const {
-  absl::MutexLock lock(mu_);
+  absl::MutexLock lock(&mu_);
   auto const condition = [this, n]() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
     return static_cast<int>(queue_.size()) >= n;
   };
@@ -86,7 +86,7 @@ std::optional<Limiter::SlotGuard> BlockingLimiter::TryAcquire(
   if (auto inner = delegate_->TryAcquire(context); inner) {
     int const id = next_slot_id_.fetch_add(1, std::memory_order_relaxed);
     {
-      absl::MutexLock lock(mu_);
+      absl::MutexLock lock(&mu_);
       active_slots_.emplace(id, std::move(*inner));
     }
     return MakeSlot(this, /*start_time_ns=*/0, /*inflight_at_acquire=*/0,
@@ -102,7 +102,7 @@ std::optional<Limiter::SlotGuard> BlockingLimiter::TryAcquire(
   WaiterSlot waiter;
   waiter.context = context;
   {
-    absl::MutexLock lock(mu_);
+    absl::MutexLock lock(&mu_);
     queue_.push_back(&waiter);
   }
 
@@ -116,7 +116,7 @@ std::optional<Limiter::SlotGuard> BlockingLimiter::TryAcquire(
   // when the notification fired; on timeout it usually has not).
   std::optional<SlotGuard> delivered;
   {
-    absl::MutexLock lock(mu_);
+    absl::MutexLock lock(&mu_);
     if (waiter.slot.has_value()) {
       delivered = std::move(waiter.slot);
     } else {
@@ -144,7 +144,7 @@ std::optional<Limiter::SlotGuard> BlockingLimiter::TryAcquire(
   // SlotGuard.
   int const id = next_slot_id_.fetch_add(1, std::memory_order_relaxed);
   {
-    absl::MutexLock lock(mu_);
+    absl::MutexLock lock(&mu_);
     active_slots_.emplace(id, std::move(*delivered));
   }
   return MakeSlot(this, /*start_time_ns=*/0, /*inflight_at_acquire=*/0,
@@ -161,7 +161,7 @@ void BlockingLimiter::OnSlotComplete(CompletionStatus status,
   // touch its own locks; we must not hold ours during that.
   std::optional<SlotGuard> inner;
   {
-    absl::MutexLock lock(mu_);
+    absl::MutexLock lock(&mu_);
     auto it = active_slots_.find(partition_index);
     if (it != active_slots_.end()) {
       inner = std::move(it->second);
@@ -195,7 +195,7 @@ void BlockingLimiter::Unblock() {
   // re-enter this limiter, directly or transitively. Unblock
   // holds `mu_` across the delegate call so a callback that
   // tried to acquire `mu_` would deadlock.
-  absl::MutexLock lock(mu_);
+  absl::MutexLock lock(&mu_);
   while (!queue_.empty()) {
     WaiterSlot* const w = queue_.front();
     auto inner = delegate_->TryAcquire(w->context);

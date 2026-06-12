@@ -24,18 +24,18 @@ AbstractLimit::AbstractLimit(int initial_limit) : limit_(initial_limit) {}
 
 void AbstractLimit::OnSample(int64_t start_time_ns, int64_t rtt_ns,
                              int inflight, bool did_drop) {
-  absl::MutexLock lock(mu_);
+  absl::MutexLock lock(&mu_);
   int const new_limit = Update(start_time_ns, rtt_ns, inflight, did_drop);
   SetLimitLocked(new_limit);
 }
 
 void AbstractLimit::NotifyOnChange(ChangeCallback callback) {
-  absl::MutexLock lock(mu_);
+  absl::MutexLock lock(&mu_);
   listeners_.push_back(std::move(callback));
 }
 
 void AbstractLimit::SetLimit(int new_limit) {
-  absl::MutexLock lock(mu_);
+  absl::MutexLock lock(&mu_);
   SetLimitLocked(new_limit);
 }
 

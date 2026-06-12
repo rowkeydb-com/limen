@@ -9,9 +9,19 @@ module(
     compatibility_level = 1,
 )
 
-# Latest stable as of v0.1.0 work landing. The "Dependency versions"
-# section of ai/commit-plan.md explains why we pin latest stable.
-bazel_dep(name = "abseil-cpp", version = "20260107.1")
+# Abseil is pinned to the version gRPC is released and tested with.
+# Abseil and protobuf are released and tested together with gRPC, and
+# Limen runs inside gRPC services, so declaring a newer Abseil would
+# force every consumer onto an Abseil ahead of gRPC's tested pin: a
+# Bazel module version is a minimum, and the highest declaration in
+# the graph wins. A consumer on a newer coordinated set still
+# resolves its own.
+bazel_dep(name = "abseil-cpp", version = "20250512.1")
+
+# Latest stable releases as of v0.1.0. The metric export relies on
+# this OpenTelemetry release's asynchronous-instrument behaviour —
+# the SDK exports every attribute set observed by one callback —
+# which an older release does not provide.
 bazel_dep(name = "opentelemetry-cpp", version = "1.24.0.bcr.1")
 bazel_dep(name = "rules_cc", version = "0.2.18")
 

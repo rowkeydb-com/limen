@@ -1074,7 +1074,7 @@ TEST(TrafficSimulationTest, BlockingLimiterPreservesFifoUnderContention) {
       auto slot = limiter->TryAcquire();
       ASSERT_TRUE(slot);
       {
-        absl::MutexLock lock(release_order_mu);
+        absl::MutexLock lock(&release_order_mu);
         release_order.push_back(i);
       }
       slot->OnSuccess();
@@ -1132,7 +1132,7 @@ TEST(TrafficSimulationTest, LifoBlockingLimiterPreservesLifoUnderContention) {
       auto slot = limiter->TryAcquire();
       ASSERT_TRUE(slot);
       {
-        absl::MutexLock lock(release_order_mu);
+        absl::MutexLock lock(&release_order_mu);
         release_order.push_back(i);
       }
       slot->OnSuccess();

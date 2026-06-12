@@ -104,7 +104,7 @@ void WindowedLimit::OnSample(int64_t start_time_ns, int64_t rtt_ns,
   // Boundary crossed. Serialise across racing threads via a
   // try-lock — only one thread does the swap, the others continue
   // accumulating against the new active buffer.
-  if (!boundary_mu_.try_lock()) {
+  if (!boundary_mu_.TryLock()) {
     return;
   }
 
@@ -112,7 +112,7 @@ void WindowedLimit::OnSample(int64_t start_time_ns, int64_t rtt_ns,
   // performed the swap between our load above and our lock here.
   int64_t const due_now = next_update_time_ns_.load(std::memory_order_relaxed);
   if (end_time_ns <= due_now) {
-    boundary_mu_.unlock();
+    boundary_mu_.Unlock();
     return;
   }
 
@@ -163,7 +163,7 @@ void WindowedLimit::OnSample(int64_t start_time_ns, int64_t rtt_ns,
   // accepts the small loss in those interleavings.
   completed.Reset();
 
-  boundary_mu_.unlock();
+  boundary_mu_.Unlock();
 }
 
 }  // namespace limen
