@@ -23,6 +23,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Cache Bazel artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            .bazel-cache/
+          key: ${{ runner.os }}-bazel-clang-tidy-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-bazel-clang-tidy-
       - name: Build CI Docker image
         uses: docker/build-push-action@v6
         with:

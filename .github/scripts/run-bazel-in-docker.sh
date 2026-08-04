@@ -76,10 +76,20 @@ fi
 
 # Map the host user so output files are owned by the caller, not root.
 DOCKER_OPTS+=(--user "$(id -u):$(id -g)")
-DOCKER_OPTS+=(-e HOME=/workspace)
+DOCKER_OPTS+=(-e HOME=/tmp)
 DOCKER_OPTS+=(-e USER=limen)
 DOCKER_OPTS+=(-v "$WORKSPACE_DIR:/workspace")
+mkdir -p "$WORKSPACE_DIR/.bazel-cache"
+DOCKER_OPTS+=(-v "$WORKSPACE_DIR/.bazel-cache:/tmp/bazel-cache")
 DOCKER_OPTS+=(-w /workspace)
+
+
+BAZEL_OPTS=()
+BAZEL_OPTS+=(--disk_cache=/tmp/bazel-cache --repository_cache=/tmp/bazel-cache/repos)
+if [ -n "${BAZEL_REMOTE_CACHE:-}" ]; then
+    BAZEL_OPTS+=(--remote_cache="$BAZEL_REMOTE_CACHE" --remote_upload_local_results=true)
+    DOCKER_OPTS+=(--add-host=host.docker.internal:host-gateway)
+fi
 
 set +e
 if [ "$COMMAND" = "coverage" ]; then
@@ -92,7 +102,7 @@ if [ "$COMMAND" = "coverage" ]; then
     # root in a single container invocation, so paths inside the
     # container (where Bazel's symlinks resolve) are valid.
     docker run "${DOCKER_OPTS[@]}" "$DOCKER_IMAGE" bash -c '
-        bazel coverage //...
+        bazel coverage "${BAZEL_OPTS[@]}" //...
         rc=$?
         if [ "$rc" -eq 0 ]; then
             cp "$(bazel info output_path)/_coverage/_coverage_report.dat" \
@@ -105,7 +115,7 @@ if [ "$COMMAND" = "coverage" ]; then
     '
 else
     docker run "${DOCKER_OPTS[@]}" "$DOCKER_IMAGE" \
-        bazel "$COMMAND" --config="$CONFIG" //...
+        bazel "$COMMAND" "${BAZEL_OPTS[@]}" --config="$CONFIG" //...
 fi
 rc=$?
 set -e
