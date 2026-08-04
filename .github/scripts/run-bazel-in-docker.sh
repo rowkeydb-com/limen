@@ -79,6 +79,7 @@ DOCKER_OPTS+=(--user "$(id -u):$(id -g)")
 DOCKER_OPTS+=(-e HOME=/tmp)
 DOCKER_OPTS+=(-e USER=limen)
 DOCKER_OPTS+=(-v "$WORKSPACE_DIR:/workspace")
+mkdir -p "$WORKSPACE_DIR/.bazel-cache"
 DOCKER_OPTS+=(-v "$WORKSPACE_DIR/.bazel-cache:/tmp/bazel-cache")
 DOCKER_OPTS+=(-w /workspace)
 
