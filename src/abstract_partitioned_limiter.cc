@@ -14,15 +14,19 @@
 // permissions and limitations under the License.
 
 #include "limen/abstract_partitioned_limiter.h"
+#include "limen/abstract_limiter.h"
+#include "limen/limit.h"
 #include "limen/partition.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
-#include "opentelemetry/metrics/meter.h"
+#include "opentelemetry/metrics/observer_result.h"
+#include "opentelemetry/sdk/metrics/meter_provider.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -81,7 +85,7 @@ AbstractPartitionedLimiter::Builder::MeterProvider(
 }
 
 AbstractPartitionedLimiter::Builder&
-AbstractPartitionedLimiter::Builder::Partition(std::string name,
+AbstractPartitionedLimiter::Builder::Partition(std::string const& name,
                                                double percent) {
   // Chainable setters do not validate; Build() reports the full
   // set of configuration errors via Status. Repeated calls with
@@ -98,7 +102,8 @@ AbstractPartitionedLimiter::Builder::PartitionRejectDelay(
   // Append-only; Build() resolves each entry against the
   // partition list and reports an error if the name does not
   // match a declared partition.
-  pending_reject_delays_.push_back(PendingRejectDelay{name, delay});
+  pending_reject_delays_.push_back(
+      PendingRejectDelay{.name = name, .delay = delay});
   return *this;
 }
 
@@ -128,7 +133,9 @@ AbstractPartitionedLimiter::Builder::FindOrAddPartitionSpec(
     if (spec.name == name) return spec;
   }
   partition_specs_.push_back(
-      PartitionSpec{name, 0.0, std::chrono::milliseconds{0}});
+      PartitionSpec{.name = name,
+                    .percent = 0.0,
+                    .reject_delay = std::chrono::milliseconds{0}});
   return partition_specs_.back();
 }
 
@@ -222,9 +229,11 @@ AbstractPartitionedLimiter::Builder::Build() {
 
   if (!sleep_fn_) sleep_fn_ = &DefaultSleepFn;
 
-  AbstractLimiter::Params params{std::move(limit_), std::move(id_),
-                                 std::move(bypass_predicate_),
-                                 std::move(meter_provider_)};
+  AbstractLimiter::Params params{
+      .limit = std::move(limit_),
+      .id = std::move(id_),
+      .bypass_predicate = std::move(bypass_predicate_),
+      .meter_provider = std::move(meter_provider_)};
   return std::make_unique<AbstractPartitionedLimiter>(
       PrivateTag{}, std::move(params), std::move(partitions),
       std::move(partition_index_by_name), std::move(partition_resolvers_),
@@ -309,7 +318,8 @@ AbstractPartitionedLimiter::DoAcquire(std::string_view context) {
 
   int const post_inflight =
       inflight_.fetch_add(1, std::memory_order_relaxed) + 1;
-  return AcquireResult{post_inflight, partition_index};
+  return AcquireResult{.inflight_post = post_inflight,
+                       .partition_index = partition_index};
 }
 
 void AbstractPartitionedLimiter::OnReleasePartition(int partition_index) {

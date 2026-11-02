@@ -170,8 +170,7 @@ class Limiter::SlotGuard {
         start_time_ns_(start_time_ns),
         inflight_at_acquire_(inflight_at_acquire),
         partition_index_(partition_index),
-        bypassed_(bypassed),
-        completed_(false) {}
+        bypassed_(bypassed) {}
 
   void Complete(CompletionStatus status) {
     if (limiter_ == nullptr || completed_) {
@@ -187,7 +186,7 @@ class Limiter::SlotGuard {
   int inflight_at_acquire_;
   int partition_index_;
   bool bypassed_;
-  bool completed_;
+  bool completed_ = false;
 };
 
 inline Limiter::SlotGuard Limiter::MakeSlot(Limiter* limiter,

@@ -15,10 +15,13 @@
 
 #include "limen/windowed_limit.h"
 #include "limen/average_sample_window.h"
+#include "limen/limit.h"
+#include "limen/sample_window.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/synchronization/mutex.h"
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -67,8 +70,12 @@ absl::StatusOr<std::unique_ptr<WindowedLimit>> WindowedLimit::Builder::Build(
     return std::make_unique<AverageSampleWindow>();
   };
   Params params{
-      std::move(delegate), {factory(), factory()}, min_window_time_ns_,
-      max_window_time_ns_, window_size_,           min_rtt_threshold_ns_,
+      .delegate = std::move(delegate),
+      .slots = {factory(), factory()},
+      .min_window_time_ns = min_window_time_ns_,
+      .max_window_time_ns = max_window_time_ns_,
+      .window_size = window_size_,
+      .min_rtt_threshold_ns = min_rtt_threshold_ns_,
   };
   return std::make_unique<WindowedLimit>(PrivateTag{}, std::move(params));
 }

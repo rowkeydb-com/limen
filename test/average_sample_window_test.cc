@@ -15,7 +15,7 @@
 
 #include "limen/average_sample_window.h"
 #include "gtest/gtest.h"
-#include <atomic>
+#include <cstdint>
 #include <latch>
 #include <limits>
 #include <thread>

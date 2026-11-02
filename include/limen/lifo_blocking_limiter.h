@@ -23,12 +23,12 @@
 #include "absl/synchronization/notification.h"
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <list>
 #include <map>
 #include <memory>
 #include <optional>
-#include <string>
 #include <string_view>
 
 namespace limen {

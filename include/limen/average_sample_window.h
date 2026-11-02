@@ -42,22 +42,22 @@ class AverageSampleWindow final : public SampleWindow {
 
   void AddSample(int64_t rtt_ns, int inflight, bool did_drop) override;
 
-  int64_t CandidateRttNs() const override {
+  [[nodiscard]] int64_t CandidateRttNs() const override {
     return min_rtt_ns_.load(std::memory_order_relaxed);
   }
 
   // Arithmetic mean RTT. Returns 0 when no samples have been seen.
-  int64_t TrackedRttNs() const override;
+  [[nodiscard]] int64_t TrackedRttNs() const override;
 
-  int MaxInflight() const override {
+  [[nodiscard]] int MaxInflight() const override {
     return max_inflight_.load(std::memory_order_relaxed);
   }
 
-  int SampleCount() const override {
+  [[nodiscard]] int SampleCount() const override {
     return sample_count_.load(std::memory_order_relaxed);
   }
 
-  bool DidDrop() const override {
+  [[nodiscard]] bool DidDrop() const override {
     return did_drop_.load(std::memory_order_relaxed);
   }
 

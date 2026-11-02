@@ -34,23 +34,28 @@
 #include "limen/gradient2_limit.h"
 #include "limen/limiter.h"
 #include "limen/simple_limiter.h"
-#include "limen/windowed_limit.h"
 #include "absl/status/status.h"
-#include "absl/time/time.h"
+#include "absl/time/clock.h"
 #include "gtest/gtest.h"
+#include "opentelemetry/nostd/variant.h"
+#include "opentelemetry/sdk/common/exporter_utils.h"
 #include "opentelemetry/sdk/metrics/data/metric_data.h"
 #include "opentelemetry/sdk/metrics/data/point_data.h"
 #include "opentelemetry/sdk/metrics/export/metric_producer.h"
+#include "opentelemetry/sdk/metrics/instruments.h"
 #include "opentelemetry/sdk/metrics/meter_provider.h"
 #include "opentelemetry/sdk/metrics/metric_reader.h"
 #include "opentelemetry/sdk/metrics/push_metric_exporter.h"
+#include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -65,7 +70,7 @@ namespace sdk_metrics = opentelemetry::sdk::metrics;
 // captured ResourceMetrics.
 class CapturingExporter final : public sdk_metrics::PushMetricExporter {
  public:
-  sdk_metrics::AggregationTemporality GetAggregationTemporality(
+  [[nodiscard]] sdk_metrics::AggregationTemporality GetAggregationTemporality(
       sdk_metrics::InstrumentType /*instrument_type*/) const noexcept override {
     return sdk_metrics::AggregationTemporality::kCumulative;
   }
@@ -74,15 +79,14 @@ class CapturingExporter final : public sdk_metrics::PushMetricExporter {
     captured_.push_back(data);
     return opentelemetry::sdk::common::ExportResult::kSuccess;
   }
-  bool ForceFlush(std::chrono::microseconds /*timeout*/ =
-                      std::chrono::microseconds::max()) noexcept override {
+  bool ForceFlush(std::chrono::microseconds /*timeout*/) noexcept override {
     return true;
   }
-  bool Shutdown(std::chrono::microseconds /*timeout*/ =
-                    std::chrono::microseconds::max()) noexcept override {
+  bool Shutdown(std::chrono::microseconds /*timeout*/) noexcept override {
     return true;
   }
-  std::vector<sdk_metrics::ResourceMetrics> const& captured() const {
+  [[nodiscard]] std::vector<sdk_metrics::ResourceMetrics> const& captured()
+      const {
     return captured_;
   }
 
@@ -94,7 +98,7 @@ class ManualReader final : public sdk_metrics::MetricReader {
  public:
   explicit ManualReader(std::shared_ptr<CapturingExporter> exporter)
       : exporter_(std::move(exporter)) {}
-  sdk_metrics::AggregationTemporality GetAggregationTemporality(
+  [[nodiscard]] sdk_metrics::AggregationTemporality GetAggregationTemporality(
       sdk_metrics::InstrumentType instrument_type) const noexcept override {
     return exporter_->GetAggregationTemporality(instrument_type);
   }
@@ -346,7 +350,7 @@ TEST(LimenObservabilityE2ETest, AllEmittedMetricsHaveLimenPrefix) {
   auto const names = DistinctMetricNames(*stack.exporter);
   ASSERT_FALSE(names.empty()) << "No metrics captured";
   for (auto const& name : names) {
-    EXPECT_EQ(name.rfind("limen.", 0), 0u)
+    EXPECT_EQ(name.rfind("limen.", 0), 0U)
         << "Metric name does not start with limen.: " << name;
   }
 }
@@ -363,7 +367,7 @@ TEST(LimenObservabilityE2ETest, AllEmittedPointsCarryIdLabel) {
   auto const points = CollectAllPoints(*stack.exporter);
   ASSERT_FALSE(points.empty()) << "No points captured";
   for (auto const& p : points) {
-    EXPECT_TRUE(p.attributes.count("id") > 0)
+    EXPECT_TRUE(p.attributes.contains("id"))
         << "Point on metric " << p.metric_name << " is missing the `id` "
         << "attribute (attributes: " << p.attributes.size() << ")";
   }
@@ -388,7 +392,7 @@ TEST(LimenObservabilityE2ETest, MetricCatalogContainsAllExpectedNames) {
   };
 
   for (auto const& expected : expected_names) {
-    EXPECT_TRUE(names.count(expected) > 0)
+    EXPECT_TRUE(names.contains(expected))
         << "Catalog metric missing from captured stream: " << expected;
   }
 }
@@ -542,7 +546,7 @@ TEST(LimenObservabilityE2ETest, AllOutcomeStatusesEmitOnCallCounter) {
 
   for (auto const& expected :
        {"success", "rejected", "dropped", "ignored", "bypassed"}) {
-    EXPECT_TRUE(seen_statuses.count(expected) > 0)
+    EXPECT_TRUE(seen_statuses.contains(expected))
         << "limen.call status missing from captured stream: " << expected;
   }
 }
@@ -601,13 +605,13 @@ TEST(LimenObservabilityE2ETest,
       limit_partitions.insert(it->second);
     }
   }
-  EXPECT_TRUE(inflight_partitions.count("alpha") > 0)
+  EXPECT_TRUE(inflight_partitions.contains("alpha"))
       << "limen.inflight is missing a `partition=alpha` data point";
-  EXPECT_TRUE(inflight_partitions.count("beta") > 0)
+  EXPECT_TRUE(inflight_partitions.contains("beta"))
       << "limen.inflight is missing a `partition=beta` data point";
-  EXPECT_TRUE(limit_partitions.count("alpha") > 0)
+  EXPECT_TRUE(limit_partitions.contains("alpha"))
       << "limen.limit.partition is missing a `partition=alpha` data point";
-  EXPECT_TRUE(limit_partitions.count("beta") > 0)
+  EXPECT_TRUE(limit_partitions.contains("beta"))
       << "limen.limit.partition is missing a `partition=beta` data point";
 }
 
@@ -673,7 +677,7 @@ TEST(LimenObservabilityE2ETest, CumulativeCountersAccumulateAcrossCollects) {
   }
   reader_ptr->Collect();
   size_t const captured_after_first = exporter->captured().size();
-  ASSERT_GT(captured_after_first, 0u);
+  ASSERT_GT(captured_after_first, 0U);
 
   // Drive 4 more successes, collect, read again.
   for (int i = 0; i < 4; ++i) {
@@ -698,7 +702,7 @@ TEST(LimenObservabilityE2ETest, CumulativeCountersAccumulateAcrossCollects) {
     if (status_it->second != "success" || id_it->second != "cumulative") {
       continue;
     }
-    if (p.value > highest_seen) highest_seen = p.value;
+    highest_seen = std::max(highest_seen, p.value);
   }
   EXPECT_EQ(highest_seen, 7)
       << "limen.call{id=cumulative,status=success} cumulative count must "

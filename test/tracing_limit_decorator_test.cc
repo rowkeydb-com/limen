@@ -27,7 +27,7 @@ namespace {
 
 class CountingLimit final : public Limit {
  public:
-  int GetLimit() const override { return 42; }
+  [[nodiscard]] int GetLimit() const override { return 42; }
 
   void OnSample(int64_t /*start_time_ns*/, int64_t rtt_ns, int inflight,
                 bool did_drop) override {
@@ -49,13 +49,14 @@ TEST(TracingLimitDecoratorTest, LogsOncePerSample) {
   auto delegate = std::make_unique<CountingLimit>();
   std::vector<std::string> lines;
   auto traced = TracingLimitDecorator::Wrap(
-      std::move(delegate), [&](std::string line) { lines.push_back(line); });
+      std::move(delegate),
+      [&](std::string line) { lines.push_back(std::move(line)); });
 
   traced->OnSample(0, 1'000'000, /*inflight=*/5, /*did_drop=*/false);
   traced->OnSample(0, 2'000'000, 7, true);
   traced->OnSample(0, 500'000, 3, false);
 
-  ASSERT_EQ(lines.size(), 3u);
+  ASSERT_EQ(lines.size(), 3U);
   // Each line carries the inflight count, the RTT in milliseconds,
   // and the did-drop flag.
   EXPECT_NE(lines[0].find("maxInFlight=5"), std::string::npos);
@@ -69,8 +70,8 @@ TEST(TracingLimitDecoratorTest, LogsOncePerSample) {
 TEST(TracingLimitDecoratorTest, PassesSamplesThrough) {
   auto delegate = std::make_unique<CountingLimit>();
   auto* counting = delegate.get();
-  auto traced =
-      TracingLimitDecorator::Wrap(std::move(delegate), [](std::string) {});
+  auto traced = TracingLimitDecorator::Wrap(std::move(delegate),
+                                            [](std::string const&) {});
 
   traced->OnSample(0, 1'000'000, 5, false);
   traced->OnSample(0, 2'000'000, 7, true);
@@ -83,8 +84,8 @@ TEST(TracingLimitDecoratorTest, PassesSamplesThrough) {
 
 TEST(TracingLimitDecoratorTest, GetLimitDelegates) {
   auto delegate = std::make_unique<CountingLimit>();
-  auto traced =
-      TracingLimitDecorator::Wrap(std::move(delegate), [](std::string) {});
+  auto traced = TracingLimitDecorator::Wrap(std::move(delegate),
+                                            [](std::string const&) {});
   EXPECT_EQ(traced->GetLimit(), 42);
 }
 

@@ -14,12 +14,14 @@
 // permissions and limitations under the License.
 
 #include "limen/gradient2_limit.h"
+#include "limen/abstract_limit.h"
 #include "limen/abstract_limiter.h"
 #include "opentelemetry/common/attribute_value.h"
 #include "opentelemetry/common/key_value_iterable_view.h"
 #include "opentelemetry/context/context.h"
-#include "opentelemetry/metrics/meter.h"
+#include "opentelemetry/sdk/metrics/aggregation/aggregation_config.h"
 #include "opentelemetry/sdk/metrics/instruments.h"
+#include "opentelemetry/sdk/metrics/meter_provider.h"
 #include "opentelemetry/sdk/metrics/view/instrument_selector.h"
 #include "opentelemetry/sdk/metrics/view/meter_selector.h"
 #include "opentelemetry/sdk/metrics/view/view.h"
@@ -27,6 +29,7 @@
 #include <cmath>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -98,9 +101,15 @@ std::unique_ptr<Gradient2Limit> Gradient2Limit::Builder::Build() {
   // call on the same Builder yields an identically-configured second
   // limiter rather than one with an empty id and a null MeterProvider.
   Params params{
-      initial_limit_,  min_limit_, max_concurrency_, queue_size_fn_,
-      rtt_tolerance_,  smoothing_, long_window_,     id_,
-      meter_provider_,
+      .initial_limit = initial_limit_,
+      .min_limit = min_limit_,
+      .max_concurrency = max_concurrency_,
+      .queue_size_fn = queue_size_fn_,
+      .rtt_tolerance = rtt_tolerance_,
+      .smoothing = smoothing_,
+      .long_window = long_window_,
+      .id = id_,
+      .meter_provider = meter_provider_,
   };
   return std::unique_ptr<Gradient2Limit>(new Gradient2Limit(std::move(params)));
 }
@@ -162,12 +171,12 @@ int Gradient2Limit::Update(int64_t /*start_time_ns*/, int64_t rtt_ns,
     return static_cast<int>(estimated_limit_);
   }
 
-  double const short_rtt = static_cast<double>(rtt_ns);
+  auto const short_rtt = static_cast<double>(rtt_ns);
   double const long_rtt = long_rtt_.Add(short_rtt);
   // The additive-increase term is evaluated against the current
   // cap. Constant-form callables ignore the argument; the default
   // sqrt form scales the probe rate sublinearly with cap size.
-  double const queue_size =
+  auto const queue_size =
       static_cast<double>(queue_size_fn_(static_cast<int>(estimated_limit_)));
 
   RecordHistograms(short_rtt, long_rtt, queue_size);
@@ -193,8 +202,9 @@ int Gradient2Limit::Update(int64_t /*start_time_ns*/, int64_t rtt_ns,
   double const gradient =
       std::max(0.5, std::min(1.0, tolerance_ * long_rtt / short_rtt));
 
-  double new_limit = estimated_limit_ * gradient + queue_size;
-  new_limit = estimated_limit_ * (1.0 - smoothing_) + new_limit * smoothing_;
+  double new_limit = (estimated_limit_ * gradient) + queue_size;
+  new_limit =
+      (estimated_limit_ * (1.0 - smoothing_)) + (new_limit * smoothing_);
   new_limit = std::max(static_cast<double>(min_limit_),
                        std::min(static_cast<double>(max_limit_), new_limit));
 

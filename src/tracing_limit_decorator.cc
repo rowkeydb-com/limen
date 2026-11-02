@@ -14,6 +14,7 @@
 // permissions and limitations under the License.
 
 #include "limen/tracing_limit_decorator.h"
+#include "limen/limit.h"
 #include <cstdint>
 #include <iostream>
 #include <memory>
@@ -24,7 +25,7 @@
 namespace limen {
 namespace {
 
-void WriteToClog(std::string line) { std::clog << line << '\n'; }
+void WriteToClog(std::string const& line) { std::clog << line << '\n'; }
 
 }  // namespace
 

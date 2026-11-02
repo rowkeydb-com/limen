@@ -14,13 +14,18 @@
 // permissions and limitations under the License.
 
 #include "limen/abstract_partitioned_limiter.h"
+#include "limen/abstract_limiter.h"
 #include "limen/fixed_limit.h"
+#include "limen/limiter.h"
 #include "limen/settable_limit.h"
 #include "absl/status/status.h"
 #include "gtest/gtest.h"
+#include "opentelemetry/nostd/variant.h"
+#include "opentelemetry/sdk/common/exporter_utils.h"
 #include "opentelemetry/sdk/metrics/data/metric_data.h"
 #include "opentelemetry/sdk/metrics/data/point_data.h"
 #include "opentelemetry/sdk/metrics/export/metric_producer.h"
+#include "opentelemetry/sdk/metrics/instruments.h"
 #include "opentelemetry/sdk/metrics/meter_provider.h"
 #include "opentelemetry/sdk/metrics/metric_reader.h"
 #include "opentelemetry/sdk/metrics/push_metric_exporter.h"
@@ -49,7 +54,7 @@ namespace sdk_metrics = opentelemetry::sdk::metrics;
 // captured ResourceMetrics.
 class CapturingExporter final : public sdk_metrics::PushMetricExporter {
  public:
-  sdk_metrics::AggregationTemporality GetAggregationTemporality(
+  [[nodiscard]] sdk_metrics::AggregationTemporality GetAggregationTemporality(
       sdk_metrics::InstrumentType /*instrument_type*/) const noexcept override {
     return sdk_metrics::AggregationTemporality::kCumulative;
   }
@@ -60,17 +65,16 @@ class CapturingExporter final : public sdk_metrics::PushMetricExporter {
     return opentelemetry::sdk::common::ExportResult::kSuccess;
   }
 
-  bool ForceFlush(std::chrono::microseconds /*timeout*/ =
-                      std::chrono::microseconds::max()) noexcept override {
+  bool ForceFlush(std::chrono::microseconds /*timeout*/) noexcept override {
     return true;
   }
 
-  bool Shutdown(std::chrono::microseconds /*timeout*/ =
-                    std::chrono::microseconds::max()) noexcept override {
+  bool Shutdown(std::chrono::microseconds /*timeout*/) noexcept override {
     return true;
   }
 
-  std::vector<sdk_metrics::ResourceMetrics> const& captured() const {
+  [[nodiscard]] std::vector<sdk_metrics::ResourceMetrics> const& captured()
+      const {
     return captured_;
   }
 
@@ -83,7 +87,7 @@ class ManualReader final : public sdk_metrics::MetricReader {
   explicit ManualReader(std::shared_ptr<CapturingExporter> exporter)
       : exporter_(std::move(exporter)) {}
 
-  sdk_metrics::AggregationTemporality GetAggregationTemporality(
+  [[nodiscard]] sdk_metrics::AggregationTemporality GetAggregationTemporality(
       sdk_metrics::InstrumentType instrument_type) const noexcept override {
     return exporter_->GetAggregationTemporality(instrument_type);
   }
@@ -533,7 +537,7 @@ TEST(AbstractPartitionedLimiterTest,
   EXPECT_FALSE(rejected);
   EXPECT_EQ(limiter->OutcomeCount(AbstractLimiter::Status::kRejected), 1);
 
-  ASSERT_EQ(recorded.size(), 1u);
+  ASSERT_EQ(recorded.size(), 1U);
   EXPECT_EQ(recorded[0], std::chrono::milliseconds(50));
 }
 

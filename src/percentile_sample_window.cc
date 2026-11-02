@@ -15,9 +15,11 @@
 
 #include "limen/percentile_sample_window.h"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
 
 namespace limen {
 
@@ -78,7 +80,7 @@ int64_t PercentileSampleWindow::TrackedRttNs() const {
   for (int i = 0; i < usable; ++i) {
     sort_buffer_.push_back(rtts_[i].load(std::memory_order_relaxed));
   }
-  std::sort(sort_buffer_.begin(), sort_buffer_.end());
+  std::ranges::sort(sort_buffer_);
 
   // Upstream picks the element at `round(sample_count * percentile)`
   // and converts to a zero-based index. Mirror that exactly so

@@ -45,7 +45,7 @@ class MinimumMeasurement final : public Measurement {
     return value_;
   }
 
-  double Get() const override { return value_; }
+  [[nodiscard]] double Get() const override { return value_; }
 
   void Reset() override {
     value_ = 0.0;

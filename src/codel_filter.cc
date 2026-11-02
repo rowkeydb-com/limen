@@ -14,11 +14,16 @@
 
 #include "limen/codel_filter.h"
 #include "absl/status/status.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "opentelemetry/common/key_value_iterable_view.h"
-#include "opentelemetry/metrics/meter.h"
+#include "opentelemetry/metrics/observer_result.h"
+#include "opentelemetry/nostd/shared_ptr.h"
 #include "opentelemetry/nostd/string_view.h"
+#include "opentelemetry/nostd/variant.h"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <map>
@@ -61,12 +66,12 @@ absl::StatusOr<std::unique_ptr<CodelFilter>> CodelFilter::Builder::Build() {
   }
 
   Params params{
-      target_,
-      interval_,
-      clock_ ? std::move(clock_)
-             : CodelFilter::ClockFn([] { return absl::Now(); }),
-      std::move(id_),
-      std::move(meter_provider_),
+      .target = target_,
+      .interval = interval_,
+      .clock = clock_ ? std::move(clock_)
+                      : CodelFilter::ClockFn([] { return absl::Now(); }),
+      .id = std::move(id_),
+      .meter_provider = std::move(meter_provider_),
   };
   return std::make_unique<CodelFilter>(PrivateTag{}, std::move(params));
 }

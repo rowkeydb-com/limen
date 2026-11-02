@@ -48,7 +48,7 @@ class Measurement {
 
   // Returns the current value reported by the measurement, without
   // adding a sample.
-  virtual double Get() const = 0;
+  [[nodiscard]] virtual double Get() const = 0;
 
   // Resets the measurement to its initial state.
   virtual void Reset() = 0;

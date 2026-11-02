@@ -44,7 +44,7 @@ class Limit {
   Limit& operator=(Limit&&) = delete;
 
   // Returns the algorithm's current concurrency limit.
-  virtual int GetLimit() const = 0;
+  [[nodiscard]] virtual int GetLimit() const = 0;
 
   // Registers a callback invoked whenever the algorithm publishes a
   // new limit. The callback may run on a request thread (whichever

@@ -47,7 +47,7 @@ class ExpAvgMeasurement final : public Measurement {
   ExpAvgMeasurement(int window, int warmup_window);
 
   double Add(double sample) override;
-  double Get() const override { return value_; }
+  [[nodiscard]] double Get() const override { return value_; }
   void Reset() override;
   void Update(std::function<double(double)> const& operation) override;
 

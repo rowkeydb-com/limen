@@ -104,8 +104,13 @@ Checks: >
 # Treat all enabled warnings as errors.
 WarningsAsErrors: "*"
 
-# Apply checks to all headers in the project's source tree.
-HeaderFilterRegex: ".*\\.h$"
+# Report findings in Limen's own headers only: the library's, under both
+# of the paths clang-tidy sees them by (include/limen/ when it runs on a
+# header itself, and the _virtual_includes/limen/ copy Bazel makes for
+# strip_include_prefix when a source file includes one), and the tests'
+# under test/. Abseil, OpenTelemetry and GoogleTest headers are not
+# Limen's to change.
+HeaderFilterRegex: "(^|/)((include|_virtual_includes/limen)/limen|test)/[^/]*\\.h$"
 
 CheckOptions:
   - { key: readability-identifier-naming.NamespaceCase,           value: lower_case }
@@ -136,3 +141,7 @@ CheckOptions:
   # umbrella header (<chrono>, etc.); the include-cleaner's preprocessor
   # view of these is not portable.
   - { key: misc-include-cleaner.IgnoreHeaders, value: "bits/.*" }
+  # OpenTelemetry's observable-instrument callback type,
+  # void (*)(ObserverResult, void*), takes the ObserverResult by value,
+  # so the callbacks Limen registers cannot take it by reference.
+  - { key: performance-unnecessary-value-param.AllowedTypes, value: '^opentelemetry::(v[0-9]+::)?metrics::ObserverResult$' }

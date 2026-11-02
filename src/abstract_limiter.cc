@@ -14,11 +14,12 @@
 // permissions and limitations under the License.
 
 #include "limen/abstract_limiter.h"
+#include "limen/limiter.h"
 #include "opentelemetry/common/key_value_iterable_view.h"
-#include "opentelemetry/metrics/meter.h"
 #include "opentelemetry/metrics/observer_result.h"
+#include "opentelemetry/nostd/shared_ptr.h"
 #include "opentelemetry/nostd/string_view.h"
-#include "opentelemetry/sdk/metrics/meter_provider.h"
+#include "opentelemetry/nostd/variant.h"
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -27,6 +28,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace limen {
@@ -107,8 +109,9 @@ std::optional<Limiter::SlotGuard> AbstractLimiter::DoTryAcquire(
 
 std::optional<AbstractLimiter::AcquireResult> AbstractLimiter::DoAcquire(
     std::string_view /*context*/) {
-  return AcquireResult{inflight_.fetch_add(1, std::memory_order_relaxed) + 1,
-                       -1};
+  return AcquireResult{
+      .inflight_post = inflight_.fetch_add(1, std::memory_order_relaxed) + 1,
+      .partition_index = -1};
 }
 
 void AbstractLimiter::OnSlotComplete(CompletionStatus status,

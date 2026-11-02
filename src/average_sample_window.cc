@@ -14,6 +14,7 @@
 // permissions and limitations under the License.
 
 #include "limen/average_sample_window.h"
+#include <atomic>
 #include <cstdint>
 #include <limits>
 

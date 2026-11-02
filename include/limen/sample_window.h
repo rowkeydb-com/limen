@@ -53,25 +53,25 @@ class SampleWindow {
 
   // Candidate RTT for adaptive window sizing. Implementations return
   // the smallest RTT seen so far (`int64_t` max if none).
-  virtual int64_t CandidateRttNs() const = 0;
+  [[nodiscard]] virtual int64_t CandidateRttNs() const = 0;
 
   // Tracked RTT — the value the wrapped algorithm consumes. For the
   // average window this is the arithmetic mean; for the percentile
   // window this is the configured percentile sorted at boundary time.
-  virtual int64_t TrackedRttNs() const = 0;
+  [[nodiscard]] virtual int64_t TrackedRttNs() const = 0;
 
   // Maximum in-flight count reported across all samples in the
   // window. Driven by the caller's `inflight` argument on each
   // `AddSample` call.
-  virtual int MaxInflight() const = 0;
+  [[nodiscard]] virtual int MaxInflight() const = 0;
 
   // Number of samples folded into the window. The percentile window
   // can be configured to drop samples past its array bound, but the
   // sample count still increments past the bound.
-  virtual int SampleCount() const = 0;
+  [[nodiscard]] virtual int SampleCount() const = 0;
 
   // True if any sample in the window reported `did_drop=true`.
-  virtual bool DidDrop() const = 0;
+  [[nodiscard]] virtual bool DidDrop() const = 0;
 
   // Resets the aggregate back to its initial state. Called by the
   // boundary thread after reading the slot and before the slot can

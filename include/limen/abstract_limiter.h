@@ -84,11 +84,11 @@ class AbstractLimiter : public Limiter {
 
   // Wait-free reads of the limiter's current state. Safe to call
   // from any thread without coordination.
-  int GetLimit() const { return limit_->GetLimit(); }
-  int InflightCount() const {
+  [[nodiscard]] int GetLimit() const { return limit_->GetLimit(); }
+  [[nodiscard]] int InflightCount() const {
     return inflight_.load(std::memory_order_relaxed);
   }
-  int64_t OutcomeCount(Status status) const {
+  [[nodiscard]] int64_t OutcomeCount(Status status) const {
     return outcome_counts_[static_cast<int>(status)].load(
         std::memory_order_relaxed);
   }
@@ -151,11 +151,12 @@ class AbstractLimiter : public Limiter {
   // Read-only accessors for partitioned subclasses that need to
   // wire their own observable instruments onto the same meter and
   // identify the limiter in metric label sets.
-  std::shared_ptr<opentelemetry::sdk::metrics::MeterProvider> const&
+  [[nodiscard]] std::shared_ptr<
+      opentelemetry::sdk::metrics::MeterProvider> const&
   GetMeterProvider() const {
     return meter_provider_;
   }
-  std::string const& GetId() const { return id_; }
+  [[nodiscard]] std::string const& GetId() const { return id_; }
 
   // Register a callback invoked when the wrapped Limit's cap
   // changes (a `SettableLimit::SetLimit` override or a Gradient2

@@ -15,6 +15,7 @@
 
 #include "limen/abstract_limit.h"
 #include "absl/synchronization/mutex.h"
+#include <atomic>
 #include <cstdint>
 #include <utility>
 

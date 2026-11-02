@@ -35,7 +35,7 @@ double ExpAvgMeasurement::Add(double sample) {
     value_ = sum_ / count_;
   } else {
     double const factor = SteadyStateFactor(window_);
-    value_ = value_ * (1 - factor) + sample * factor;
+    value_ = (value_ * (1 - factor)) + (sample * factor);
   }
   return value_;
 }

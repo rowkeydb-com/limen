@@ -17,9 +17,12 @@
 #include "limen/limit.h"
 #include "limen/settable_limit.h"
 #include "gtest/gtest.h"
+#include "opentelemetry/nostd/variant.h"
+#include "opentelemetry/sdk/common/exporter_utils.h"
 #include "opentelemetry/sdk/metrics/data/metric_data.h"
 #include "opentelemetry/sdk/metrics/data/point_data.h"
 #include "opentelemetry/sdk/metrics/export/metric_producer.h"
+#include "opentelemetry/sdk/metrics/instruments.h"
 #include "opentelemetry/sdk/metrics/meter_provider.h"
 #include "opentelemetry/sdk/metrics/metric_reader.h"
 #include "opentelemetry/sdk/metrics/push_metric_exporter.h"
@@ -28,6 +31,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -46,8 +50,10 @@ class TestLimiter : public AbstractLimiter {
       std::unique_ptr<Limit> limit, std::string id,
       BypassPredicate bypass_predicate = nullptr,
       std::shared_ptr<sdk_metrics::MeterProvider> meter_provider = nullptr) {
-    Params params{std::move(limit), std::move(id), std::move(bypass_predicate),
-                  std::move(meter_provider)};
+    Params params{.limit = std::move(limit),
+                  .id = std::move(id),
+                  .bypass_predicate = std::move(bypass_predicate),
+                  .meter_provider = std::move(meter_provider)};
     return std::unique_ptr<TestLimiter>(new TestLimiter(std::move(params)));
   }
 
@@ -63,8 +69,10 @@ class RejectingLimiter : public AbstractLimiter {
   static std::unique_ptr<RejectingLimiter> Create(
       std::unique_ptr<Limit> limit, std::string id,
       std::shared_ptr<sdk_metrics::MeterProvider> meter_provider = nullptr) {
-    Params params{std::move(limit), std::move(id),
-                  /*bypass_predicate=*/nullptr, std::move(meter_provider)};
+    Params params{.limit = std::move(limit),
+                  .id = std::move(id),
+                  .bypass_predicate = nullptr,
+                  .meter_provider = std::move(meter_provider)};
     return std::unique_ptr<RejectingLimiter>(
         new RejectingLimiter(std::move(params)));
   }
@@ -89,7 +97,7 @@ class RecordingLimit final : public Limit {
   explicit RecordingLimit(int initial_limit)
       : inner_(SettableLimit::StartingAt(initial_limit)) {}
 
-  int GetLimit() const override { return inner_->GetLimit(); }
+  [[nodiscard]] int GetLimit() const override { return inner_->GetLimit(); }
 
   void OnSample(int64_t start_time_ns, int64_t rtt_ns, int inflight,
                 bool did_drop) override {
@@ -121,7 +129,7 @@ class RecordingLimit final : public Limit {
 // trigger collection through `ManualReader::Collect`.
 class CapturingExporter final : public sdk_metrics::PushMetricExporter {
  public:
-  sdk_metrics::AggregationTemporality GetAggregationTemporality(
+  [[nodiscard]] sdk_metrics::AggregationTemporality GetAggregationTemporality(
       sdk_metrics::InstrumentType /*instrument_type*/) const noexcept override {
     return sdk_metrics::AggregationTemporality::kCumulative;
   }
@@ -132,17 +140,16 @@ class CapturingExporter final : public sdk_metrics::PushMetricExporter {
     return opentelemetry::sdk::common::ExportResult::kSuccess;
   }
 
-  bool ForceFlush(std::chrono::microseconds /*timeout*/ =
-                      std::chrono::microseconds::max()) noexcept override {
+  bool ForceFlush(std::chrono::microseconds /*timeout*/) noexcept override {
     return true;
   }
 
-  bool Shutdown(std::chrono::microseconds /*timeout*/ =
-                    std::chrono::microseconds::max()) noexcept override {
+  bool Shutdown(std::chrono::microseconds /*timeout*/) noexcept override {
     return true;
   }
 
-  std::vector<sdk_metrics::ResourceMetrics> const& captured() const {
+  [[nodiscard]] std::vector<sdk_metrics::ResourceMetrics> const& captured()
+      const {
     return captured_;
   }
 
@@ -157,7 +164,7 @@ class ManualReader final : public sdk_metrics::MetricReader {
   explicit ManualReader(std::shared_ptr<CapturingExporter> exporter)
       : exporter_(std::move(exporter)) {}
 
-  sdk_metrics::AggregationTemporality GetAggregationTemporality(
+  [[nodiscard]] sdk_metrics::AggregationTemporality GetAggregationTemporality(
       sdk_metrics::InstrumentType instrument_type) const noexcept override {
     return exporter_->GetAggregationTemporality(instrument_type);
   }
@@ -424,7 +431,7 @@ TEST(AbstractLimiterTest, NoAllocationOnHotPath) {
   OtelHarness h;
   auto limiter =
       TestLimiter::Create(std::make_unique<RecordingLimit>(50), "otel",
-                          /*bypass=*/nullptr, h.provider);
+                          /*bypass_predicate=*/nullptr, h.provider);
 
   constexpr int kIterations = 1000;
   AllocationCounter allocations;

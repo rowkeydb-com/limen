@@ -41,7 +41,9 @@ class AbstractLimit : public Limit {
  public:
   explicit AbstractLimit(int initial_limit);
 
-  int GetLimit() const final { return limit_.load(std::memory_order_relaxed); }
+  [[nodiscard]] int GetLimit() const final {
+    return limit_.load(std::memory_order_relaxed);
+  }
 
   void OnSample(int64_t start_time_ns, int64_t rtt_ns, int inflight,
                 bool did_drop) final ABSL_LOCKS_EXCLUDED(mu_);

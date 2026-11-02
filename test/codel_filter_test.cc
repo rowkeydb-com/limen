@@ -14,11 +14,15 @@
 
 #include "limen/codel_filter.h"
 #include "absl/status/status.h"
+#include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "gtest/gtest.h"
+#include "opentelemetry/nostd/variant.h"
+#include "opentelemetry/sdk/common/exporter_utils.h"
 #include "opentelemetry/sdk/metrics/data/metric_data.h"
 #include "opentelemetry/sdk/metrics/data/point_data.h"
 #include "opentelemetry/sdk/metrics/export/metric_producer.h"
+#include "opentelemetry/sdk/metrics/instruments.h"
 #include "opentelemetry/sdk/metrics/meter_provider.h"
 #include "opentelemetry/sdk/metrics/metric_reader.h"
 #include "opentelemetry/sdk/metrics/push_metric_exporter.h"
@@ -29,6 +33,7 @@
 #include <cstdint>
 #include <latch>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <thread>
@@ -56,7 +61,7 @@ namespace sdk_metrics = opentelemetry::sdk::metrics;
 // lambda reads one atomic and returns; no allocation.
 class MockClock {
  public:
-  absl::Time Now() const {
+  [[nodiscard]] absl::Time Now() const {
     return absl::FromUnixNanos(now_ns_.load(std::memory_order_relaxed));
   }
   void Advance(absl::Duration d) {
@@ -89,7 +94,7 @@ class MockClock {
 // against the captured ResourceMetrics.
 class CapturingExporter final : public sdk_metrics::PushMetricExporter {
  public:
-  sdk_metrics::AggregationTemporality GetAggregationTemporality(
+  [[nodiscard]] sdk_metrics::AggregationTemporality GetAggregationTemporality(
       sdk_metrics::InstrumentType /*instrument_type*/) const noexcept override {
     return sdk_metrics::AggregationTemporality::kCumulative;
   }
@@ -98,15 +103,14 @@ class CapturingExporter final : public sdk_metrics::PushMetricExporter {
     captured_.push_back(data);
     return opentelemetry::sdk::common::ExportResult::kSuccess;
   }
-  bool ForceFlush(std::chrono::microseconds /*timeout*/ =
-                      std::chrono::microseconds::max()) noexcept override {
+  bool ForceFlush(std::chrono::microseconds /*timeout*/) noexcept override {
     return true;
   }
-  bool Shutdown(std::chrono::microseconds /*timeout*/ =
-                    std::chrono::microseconds::max()) noexcept override {
+  bool Shutdown(std::chrono::microseconds /*timeout*/) noexcept override {
     return true;
   }
-  std::vector<sdk_metrics::ResourceMetrics> const& captured() const {
+  [[nodiscard]] std::vector<sdk_metrics::ResourceMetrics> const& captured()
+      const {
     return captured_;
   }
 
@@ -118,7 +122,7 @@ class ManualReader final : public sdk_metrics::MetricReader {
  public:
   explicit ManualReader(std::shared_ptr<CapturingExporter> exporter)
       : exporter_(std::move(exporter)) {}
-  sdk_metrics::AggregationTemporality GetAggregationTemporality(
+  [[nodiscard]] sdk_metrics::AggregationTemporality GetAggregationTemporality(
       sdk_metrics::InstrumentType instrument_type) const noexcept override {
     return exporter_->GetAggregationTemporality(instrument_type);
   }
@@ -288,7 +292,7 @@ TEST(CodelFilterTest, ControlLawProducesInverseSqrtScheduleWithPinnedValues) {
   MockClock clock;
   auto filter = BuildWithMockClock(clock);
   absl::Time const t_entry = DriveIntoDropMode(*filter, clock);
-  ASSERT_EQ(filter->DropEpisodeCount(), 1u);
+  ASSERT_EQ(filter->DropEpisodeCount(), 1U);
 
   // After entry, drop_next_ should be t_entry + interval/sqrt(1)
   // = t_entry + 100ms. Tolerance 1µs.
@@ -354,7 +358,7 @@ TEST(CodelFilterTest, CountResetsToOneOnDropModeReentryAfterLongQuietPeriod) {
 
   // First episode: drive count_ to 5 (entry plus 4 in-drop drops).
   (void)DriveDropEpisode(*filter, clock, /*additional_in_drop_drops=*/4);
-  ASSERT_EQ(filter->DropEpisodeCount(), 5u);
+  ASSERT_EQ(filter->DropEpisodeCount(), 5U);
 
   // Exit drop mode.
   ExitDropMode(*filter, clock);
@@ -369,7 +373,7 @@ TEST(CodelFilterTest, CountResetsToOneOnDropModeReentryAfterLongQuietPeriod) {
   // so the hysteresis branch fails. count_ = 1.
   absl::Time const reentry_time = DriveIntoDropMode(*filter, clock);
 
-  EXPECT_EQ(filter->DropEpisodeCount(), 1u);
+  EXPECT_EQ(filter->DropEpisodeCount(), 1U);
   // drop_next_ at re-entry is ControlLaw(reentry_time, 1)
   // = reentry_time + 100ms.
   constexpr absl::Duration kTolerance = absl::Microseconds(1);
@@ -386,7 +390,7 @@ TEST(CodelFilterTest, CountInheritsDeltaFromPreviousEpisodeOnRecentReentry) {
   // First episode: count_ grows to 5, lastcount_ stays at 1 (set
   // at the entry of this episode).
   (void)DriveDropEpisode(*filter, clock, /*additional_in_drop_drops=*/4);
-  ASSERT_EQ(filter->DropEpisodeCount(), 5u);
+  ASSERT_EQ(filter->DropEpisodeCount(), 5U);
 
   ExitDropMode(*filter, clock);
 
@@ -399,7 +403,7 @@ TEST(CodelFilterTest, CountInheritsDeltaFromPreviousEpisodeOnRecentReentry) {
   // delta=4.
   absl::Time const reentry_time = DriveIntoDropMode(*filter, clock);
 
-  EXPECT_EQ(filter->DropEpisodeCount(), 4u);
+  EXPECT_EQ(filter->DropEpisodeCount(), 4U);
   // drop_next_ at re-entry is ControlLaw(reentry_time, 4)
   // = reentry_time + 100ms/sqrt(4) = reentry_time + 50ms.
   constexpr absl::Duration kTolerance = absl::Microseconds(1);
@@ -416,7 +420,7 @@ TEST(CodelFilterTest, LastCountUpdatedToCurrentCountAtDropModeEntry) {
   // Episode 1: drive count_ to 3 (entry + 2 in-drop drops). At
   // entry, count_=1, lastcount_=1.
   (void)DriveDropEpisode(*filter, clock, /*additional_in_drop_drops=*/2);
-  ASSERT_EQ(filter->DropEpisodeCount(), 3u);
+  ASSERT_EQ(filter->DropEpisodeCount(), 3U);
 
   ExitDropMode(*filter, clock);
 
@@ -425,7 +429,7 @@ TEST(CodelFilterTest, LastCountUpdatedToCurrentCountAtDropModeEntry) {
   // second episode (entry + 5 in-drop drops).
   clock.Advance(2 * absl::Milliseconds(100));
   (void)DriveDropEpisode(*filter, clock, /*additional_in_drop_drops=*/5);
-  ASSERT_EQ(filter->DropEpisodeCount(), 7u);
+  ASSERT_EQ(filter->DropEpisodeCount(), 7U);
 
   ExitDropMode(*filter, clock);
 
@@ -435,7 +439,7 @@ TEST(CodelFilterTest, LastCountUpdatedToCurrentCountAtDropModeEntry) {
   clock.Advance(2 * absl::Milliseconds(100));
   absl::Time const reentry_time = DriveIntoDropMode(*filter, clock);
 
-  EXPECT_EQ(filter->DropEpisodeCount(), 5u);
+  EXPECT_EQ(filter->DropEpisodeCount(), 5U);
   // drop_next_ = ControlLaw(reentry_time, 5)
   // = reentry_time + 100ms/sqrt(5) ≈ reentry_time + 44.7214ms.
   constexpr absl::Duration kTolerance = absl::Microseconds(1);
@@ -454,7 +458,7 @@ TEST(CodelFilterTest, ClockSkewYieldsZeroSojourn) {
   EXPECT_FALSE(filter->ShouldDrop(clock.Now() + absl::Seconds(1)));
   EXPECT_FALSE(filter->IsDropping());
   EXPECT_EQ(filter->DropCount(), 0);
-  EXPECT_EQ(filter->DropEpisodeCount(), 0u);
+  EXPECT_EQ(filter->DropEpisodeCount(), 0U);
 
   // A subsequent normal call behaves identically to a freshly-
   // built filter: sojourn=0, no drop.

@@ -14,7 +14,9 @@
 // permissions and limitations under the License.
 
 #include "limen/lifo_blocking_limiter.h"
+#include "limen/abstract_limiter.h"
 #include "limen/fixed_limit.h"
+#include "limen/limiter.h"
 #include "limen/settable_limit.h"
 #include "limen/simple_limiter.h"
 #include "absl/status/status.h"
@@ -23,6 +25,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>

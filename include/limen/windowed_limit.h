@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <utility>
 
 namespace limen {
 
@@ -118,7 +119,7 @@ class WindowedLimit final : public Limit {
     WindowFactory sample_window_factory_;
   };
 
-  int GetLimit() const final { return delegate_->GetLimit(); }
+  [[nodiscard]] int GetLimit() const final { return delegate_->GetLimit(); }
 
   void OnSample(int64_t start_time_ns, int64_t rtt_ns, int inflight,
                 bool did_drop) final;

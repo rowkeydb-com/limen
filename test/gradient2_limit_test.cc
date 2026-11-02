@@ -15,9 +15,12 @@
 
 #include "limen/gradient2_limit.h"
 #include "gtest/gtest.h"
+#include "opentelemetry/nostd/variant.h"
+#include "opentelemetry/sdk/common/exporter_utils.h"
 #include "opentelemetry/sdk/metrics/data/metric_data.h"
 #include "opentelemetry/sdk/metrics/data/point_data.h"
 #include "opentelemetry/sdk/metrics/export/metric_producer.h"
+#include "opentelemetry/sdk/metrics/instruments.h"
 #include "opentelemetry/sdk/metrics/meter_provider.h"
 #include "opentelemetry/sdk/metrics/metric_reader.h"
 #include "opentelemetry/sdk/metrics/push_metric_exporter.h"
@@ -38,7 +41,7 @@ namespace sdk_metrics = opentelemetry::sdk::metrics;
 // `MetricReader::Collect` and then read back the captured data.
 class CapturingExporter final : public sdk_metrics::PushMetricExporter {
  public:
-  sdk_metrics::AggregationTemporality GetAggregationTemporality(
+  [[nodiscard]] sdk_metrics::AggregationTemporality GetAggregationTemporality(
       sdk_metrics::InstrumentType /*instrument_type*/) const noexcept override {
     return sdk_metrics::AggregationTemporality::kCumulative;
   }
@@ -49,17 +52,16 @@ class CapturingExporter final : public sdk_metrics::PushMetricExporter {
     return opentelemetry::sdk::common::ExportResult::kSuccess;
   }
 
-  bool ForceFlush(std::chrono::microseconds /*timeout*/ =
-                      std::chrono::microseconds::max()) noexcept override {
+  bool ForceFlush(std::chrono::microseconds /*timeout*/) noexcept override {
     return true;
   }
 
-  bool Shutdown(std::chrono::microseconds /*timeout*/ =
-                    std::chrono::microseconds::max()) noexcept override {
+  bool Shutdown(std::chrono::microseconds /*timeout*/) noexcept override {
     return true;
   }
 
-  std::vector<sdk_metrics::ResourceMetrics> const& captured() const {
+  [[nodiscard]] std::vector<sdk_metrics::ResourceMetrics> const& captured()
+      const {
     return captured_;
   }
 
@@ -75,7 +77,7 @@ class ManualReader final : public sdk_metrics::MetricReader {
   explicit ManualReader(std::shared_ptr<CapturingExporter> exporter)
       : exporter_(std::move(exporter)) {}
 
-  sdk_metrics::AggregationTemporality GetAggregationTemporality(
+  [[nodiscard]] sdk_metrics::AggregationTemporality GetAggregationTemporality(
       sdk_metrics::InstrumentType instrument_type) const noexcept override {
     return exporter_->GetAggregationTemporality(instrument_type);
   }
@@ -442,15 +444,15 @@ TEST(Gradient2LimitTest, HistogramsRecordOncePerUpdateCall) {
   // `Record` calls — three for three OnSample invocations.
   auto const* long_rtt = FindHistogramPoint(*exporter, "limen.min_rtt");
   ASSERT_NE(long_rtt, nullptr);
-  EXPECT_EQ(long_rtt->count_, 3u);
+  EXPECT_EQ(long_rtt->count_, 3U);
 
   auto const* short_rtt = FindHistogramPoint(*exporter, "limen.min_window_rtt");
   ASSERT_NE(short_rtt, nullptr);
-  EXPECT_EQ(short_rtt->count_, 3u);
+  EXPECT_EQ(short_rtt->count_, 3U);
 
   auto const* queue = FindHistogramPoint(*exporter, "limen.queue_size");
   ASSERT_NE(queue, nullptr);
-  EXPECT_EQ(queue->count_, 3u);
+  EXPECT_EQ(queue->count_, 3U);
 }
 
 TEST(Gradient2LimitTest, ZeroRttSampleDoesNotRecord) {
@@ -571,7 +573,7 @@ TEST(Gradient2LimitTest, FunctionalBuilderOverloadInvokedWithCurrentCap) {
   // steady-state regime (gradient stays at 1.0, the constant-4
   // term grows the cap each window). Any regression that passes
   // a stale or wrong cap value into the callable shows up here.
-  for (int i = 1; i < static_cast<int>(seen_caps.size()); ++i) {
+  for (int i = 1; std::cmp_less(i, seen_caps.size()); ++i) {
     EXPECT_GE(seen_caps[i], seen_caps[i - 1])
         << "Cap passed to the callable must be monotone non-decreasing "
            "in steady state. seen_caps["
@@ -638,7 +640,7 @@ TEST(Gradient2LimitTest, ConstantQueueSizeBuilderShortcutPreservesBehaviour) {
           .Build();
 
   for (int i = 0; i < 100; ++i) {
-    int64_t const rtt = 1'000'000 + static_cast<int64_t>(i % 5) * 100'000;
+    int64_t const rtt = 1'000'000 + (static_cast<int64_t>(i % 5) * 100'000);
     int const inflight = const_int->GetLimit();
     const_int->OnSample(0, rtt, inflight, false);
     const_fn->OnSample(0, rtt, const_fn->GetLimit(), false);

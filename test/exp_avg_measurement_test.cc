@@ -48,11 +48,11 @@ TEST(ExpAvgMeasurementTest, SteadyStateIsExponentialAverage) {
   //   new_value = 100 * 0.8 + 50 * 0.2 = 90.0
   double const factor = 2.0 / (window + 1);
   EXPECT_NEAR(factor, 0.2, kEpsilon);
-  EXPECT_NEAR(measurement.Add(50.0), 100.0 * 0.8 + 50.0 * 0.2, kEpsilon);
+  EXPECT_NEAR(measurement.Add(50.0), (100.0 * 0.8) + (50.0 * 0.2), kEpsilon);
 
   // Third sample:
   //   new_value = 90 * 0.8 + 70 * 0.2 = 86.0
-  EXPECT_NEAR(measurement.Add(70.0), 90.0 * 0.8 + 70.0 * 0.2, kEpsilon);
+  EXPECT_NEAR(measurement.Add(70.0), (90.0 * 0.8) + (70.0 * 0.2), kEpsilon);
 }
 
 // Reset clears the value, sum, and the warmup counter so the next

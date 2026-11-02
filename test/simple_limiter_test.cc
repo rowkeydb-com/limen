@@ -14,13 +14,14 @@
 // permissions and limitations under the License.
 
 #include "limen/simple_limiter.h"
+#include "limen/abstract_limiter.h"
 #include "limen/fixed_limit.h"
+#include "limen/limiter.h"
 #include "limen/settable_limit.h"
 #include "absl/status/status.h"
 #include "gtest/gtest.h"
 #include "test/allocation_counter.h"
 #include <atomic>
-#include <cstdint>
 #include <latch>
 #include <memory>
 #include <optional>

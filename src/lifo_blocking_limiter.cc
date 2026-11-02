@@ -14,6 +14,8 @@
 // permissions and limitations under the License.
 
 #include "limen/lifo_blocking_limiter.h"
+#include "limen/limiter.h"
+#include "absl/base/thread_annotations.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -23,6 +25,8 @@
 #include "absl/time/time.h"
 #include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string_view>
@@ -104,7 +108,7 @@ int LifoBlockingLimiter::BacklogSize() const {
 void LifoBlockingLimiter::AwaitBacklogSize(int n) const {
   absl::MutexLock lock(mu_);
   auto const condition = [this, n]() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
-    return static_cast<int>(deque_.size()) >= n;
+    return std::cmp_greater_equal(deque_.size(), n);
   };
   mu_.Await(absl::Condition(&condition));
 }
@@ -128,7 +132,7 @@ std::optional<Limiter::SlotGuard> LifoBlockingLimiter::DoTryAcquire(
   waiter.context = context;
   {
     absl::MutexLock lock(mu_);
-    if (static_cast<int>(deque_.size()) >= backlog_size_) {
+    if (std::cmp_greater_equal(deque_.size(), backlog_size_)) {
       return std::nullopt;
     }
     deque_.push_front(&waiter);

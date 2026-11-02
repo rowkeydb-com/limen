@@ -21,6 +21,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 
 namespace limen {
 
@@ -50,7 +51,7 @@ class TracingLimitDecorator final : public Limit {
   static std::unique_ptr<TracingLimitDecorator> Wrap(
       std::unique_ptr<Limit> delegate, LogSink sink = LogSink{});
 
-  int GetLimit() const final { return delegate_->GetLimit(); }
+  [[nodiscard]] int GetLimit() const final { return delegate_->GetLimit(); }
 
   void OnSample(int64_t start_time_ns, int64_t rtt_ns, int inflight,
                 bool did_drop) final;

@@ -14,6 +14,7 @@
 // permissions and limitations under the License.
 
 #include "limen/simple_limiter.h"
+#include "limen/abstract_limiter.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include <atomic>
@@ -29,9 +30,11 @@ absl::StatusOr<std::unique_ptr<SimpleLimiter>> SimpleLimiter::Builder::Build() {
     return absl::InvalidArgumentError(
         "SimpleLimiter::Builder::Limit() is required");
   }
-  AbstractLimiter::Params params{std::move(limit_), std::move(id_),
-                                 std::move(bypass_predicate_),
-                                 std::move(meter_provider_)};
+  AbstractLimiter::Params params{
+      .limit = std::move(limit_),
+      .id = std::move(id_),
+      .bypass_predicate = std::move(bypass_predicate_),
+      .meter_provider = std::move(meter_provider_)};
   return std::make_unique<SimpleLimiter>(PrivateTag{}, std::move(params));
 }
 
@@ -55,7 +58,7 @@ std::optional<AbstractLimiter::AcquireResult> SimpleLimiter::DoAcquire(
     if (inflight_.compare_exchange_weak(current, current + 1,
                                         std::memory_order_relaxed,
                                         std::memory_order_relaxed)) {
-      return AcquireResult{current + 1, /*partition_index=*/-1};
+      return AcquireResult{.inflight_post = current + 1, .partition_index = -1};
     }
     // The CAS updated `current` to the live value; the loop
     // re-checks against the (possibly also updated) cap.

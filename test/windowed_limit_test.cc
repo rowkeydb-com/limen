@@ -34,7 +34,7 @@ namespace {
 // the delegate must not allocate (it never pushes onto a vector).
 class NoAllocLimit final : public Limit {
  public:
-  int GetLimit() const override { return 100; }
+  [[nodiscard]] int GetLimit() const override { return 100; }
 
   void OnSample(int64_t /*start_time_ns*/, int64_t /*rtt_ns*/, int /*inflight*/,
                 bool /*did_drop*/) override {
@@ -50,7 +50,7 @@ class NoAllocLimit final : public Limit {
 // assert what the wrapped algorithm sees.
 class CountingLimit final : public Limit {
  public:
-  int GetLimit() const override { return 100; }
+  [[nodiscard]] int GetLimit() const override { return 100; }
 
   void OnSample(int64_t start_time_ns, int64_t rtt_ns, int inflight,
                 bool did_drop) override {
@@ -211,7 +211,7 @@ TEST(WindowedLimitTest, BoundarySwapResetsInactive) {
   // equals the new sample RTT exactly because the inactive slot
   // was reset.
   for (int i = 0; i < 10; ++i) {
-    windowed->OnSample(3'100'000 + static_cast<int64_t>(i) * 100'000, 800'000,
+    windowed->OnSample(3'100'000 + (static_cast<int64_t>(i) * 100'000), 800'000,
                        1, false);
   }
   windowed->OnSample(6'000'000, 800'000, 1, false);
@@ -255,8 +255,8 @@ TEST(WindowedLimitTest, AdaptiveWindowSize) {
   // The low-RTT window does not. Verify the low-RTT window's actual
   // observed inter-fire spacing is below the high-RTT one's, which
   // is the operational signature of adaptive sizing.
-  ASSERT_GE(fast->fire_start_times.size(), 2u);
-  ASSERT_GE(slow->fire_start_times.size(), 2u);
+  ASSERT_GE(fast->fire_start_times.size(), 2U);
+  ASSERT_GE(slow->fire_start_times.size(), 2U);
   int64_t const fast_gap =
       fast->fire_start_times[1] - fast->fire_start_times[0];
   int64_t const slow_gap =

@@ -23,8 +23,8 @@
 #include "opentelemetry/metrics/async_instruments.h"
 #include "opentelemetry/metrics/observer_result.h"
 #include "opentelemetry/sdk/metrics/meter_provider.h"
+#include <atomic>
 #include <chrono>
-#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -131,7 +131,7 @@ class AbstractPartitionedLimiter final : public AbstractLimiter {
     // the existing entry's percentage. The sum of all
     // partition percentages must be <= 1.0, validated at Build()
     // time. At least one Partition declaration is required.
-    Builder& Partition(std::string name, double percent);
+    Builder& Partition(std::string const& name, double percent);
 
     // Set the reject-delay duration for a previously-declared
     // partition. The named partition must exist (declare it via
@@ -204,16 +204,16 @@ class AbstractPartitionedLimiter final : public AbstractLimiter {
   // if no partition by that name is configured (the synthetic
   // "unknown" partition counts as configured under
   // `kUnknownPartitionName`).
-  int PartitionInflightCount(std::string_view name) const;
+  [[nodiscard]] int PartitionInflightCount(std::string_view name) const;
 
   // Current per-partition cap for the named partition. Returns 0
   // if no partition by that name is configured. A configured
   // partition always has a cap of at least one slot.
-  int PartitionLimitFor(std::string_view name) const;
+  [[nodiscard]] int PartitionLimitFor(std::string_view name) const;
 
   // Number of threads currently parked in the reject-delay sleep
   // path. Test accessor.
-  int DelayedThreadCount() const;
+  [[nodiscard]] int DelayedThreadCount() const;
 
   // Override Limiter behaviour to consult per-partition state.
   std::optional<AcquireResult> DoAcquire(std::string_view context) override;
@@ -240,7 +240,7 @@ class AbstractPartitionedLimiter final : public AbstractLimiter {
       int max_delayed_threads, SleepFn sleep_fn);
 
  private:
-  int ResolvePartition(std::string_view context) const;
+  [[nodiscard]] int ResolvePartition(std::string_view context) const;
   void RecomputePartitionLimits(int new_global_limit);
   void RegisterPartitionInstruments();
   void MaybeBackoffDelay(limen::Partition const& part);
