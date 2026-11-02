@@ -227,3 +227,9 @@ cc_test(
         "@opentelemetry-cpp//sdk/src/metrics",
     ],
 )
+
+filegroup(
+    name = "clang_tidy_config",
+    srcs = [".clang-tidy"],
+    visibility = ["//visibility:public"],
+)

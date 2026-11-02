@@ -1,9 +1,5 @@
 # Bazel build artefacts.
 /bazel-*
-MODULE.bazel.lock
-
-# Per-developer Bazel overrides loaded via `try-import` in .bazelrc.
-.bazelrc.user
 
 # Internal planning artefacts not part of the public repository.
 /ai/

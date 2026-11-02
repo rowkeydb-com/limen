@@ -5,25 +5,48 @@ See design/architecture.md for the full library overview.
 
 module(
     name = "limen",
-    version = "0.1.0",
+    version = "0.2.0",
     compatibility_level = 1,
 )
 
-# Abseil is pinned to the version gRPC is released and tested with.
-# Abseil and protobuf are released and tested together with gRPC, and
-# Limen runs inside gRPC services, so declaring a newer Abseil would
-# force every consumer onto an Abseil ahead of gRPC's tested pin: a
-# Bazel module version is a minimum, and the highest declaration in
-# the graph wins. A consumer on a newer coordinated set still
-# resolves its own.
-bazel_dep(name = "abseil-cpp", version = "20250512.1")
+# The build infrastructure shared with rowkeydb, rowkeyraft and
+# zetasketch-cpp: the image every action runs in, the versions of the
+# shared modules and the options in bazel/build_infra/shared.bazelrc
+# (rowkeydb's design/shared_build_architecture.md). Pinned to the archive
+# of one commit, published as an asset of its release; the shared options
+# are copied from the same commit. A development dependency, as the
+# design's section on the shared Bazel module requires of a library: a
+# consumer of Limen need not find the module in any registry.
+bazel_dep(name = "rowkeydb_build_infra", version = "0.9.0", dev_dependency = True)
+archive_override(
+    module_name = "rowkeydb_build_infra",
+    integrity = "sha256-D7t8EBse/u0hZh5Dnbt8BQOfAHtEdd/f8+ZeY+00tXQ=",
+    strip_prefix = "rowkeydb-build-infra-0e346a1b7cc6f85484aeb7983614bf13d22c227a",
+    urls = [
+        "https://github.com/rowkeydb-com/rowkeydb-build-infra/releases/download/v0.9.0/rowkeydb-build-infra-0e346a1b7cc6f85484aeb7983614bf13d22c227a.tar.gz",
+    ],
+)
 
-# Latest stable releases as of v0.1.0. The metric export relies on
-# this OpenTelemetry release's asynchronous-instrument behaviour —
-# the SDK exports every attribute set observed by one callback —
-# which an older release does not provide.
-bazel_dep(name = "opentelemetry-cpp", version = "1.24.0.bcr.1")
-bazel_dep(name = "rules_cc", version = "0.2.18")
+# --- clang-tidy ---
+git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
+git_repository(
+    name = "bazel_clang_tidy",
+    commit = "496018e020cf0a7d813a2b5a9d246ec55340a7ed",
+    remote = "https://github.com/erenon/bazel_clang_tidy.git",
+)
+
+# --- Dependencies ---
+# Abseil, the OpenTelemetry C++ SDK and rules_cc at the versions
+# rowkeydb_build_infra approves, which its scripts/check.sh compares, so
+# that Limen compiles them as the other repositories on that
+# infrastructure do and shares their compilations. A Bazel module
+# version is a minimum: a consumer of Limen resolves these or newer. The
+# metric export relies on the SDK's asynchronous-instrument behaviour,
+# the SDK exporting every attribute set observed by one callback, which
+# releases before 1.24 do not provide.
+bazel_dep(name = "abseil-cpp", version = "20260817.0")
+bazel_dep(name = "opentelemetry-cpp", version = "1.30.0")
+bazel_dep(name = "rules_cc", version = "0.2.26")
 
 # Test-only dependency. GoogleTest is not visible to consumers.
-bazel_dep(name = "googletest", version = "1.17.0.bcr.2", dev_dependency = True)
+bazel_dep(name = "googletest", version = "1.18.0", dev_dependency = True)

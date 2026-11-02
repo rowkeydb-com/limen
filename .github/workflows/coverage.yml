@@ -1,50 +1,50 @@
 name: Code Coverage
 
+# Bazel runs in the image rowkeydb-com/rowkeydb-build-infra publishes,
+# named by digest below, on one of GitHub's machines. The report is
+# rendered on that machine, in the same image. Where the repository's
+# BuildBuddy secret reaches the run, as it reaches a push and a pull
+# request from a branch of this repository, BuildBuddy runs the actions,
+# which share its cache with the other repositories built on that
+# infrastructure. GitHub gives no secret to a pull request from a fork,
+# whose actions therefore run on GitHub's machine.
+
 on:
   push:
   pull_request:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
+env:
+  CI_DOCKER_IMAGE: ghcr.io/rowkeydb-com/rowkeydb-build-infra@sha256:c811e74114ebedf787178468c9a796e4e37ae7e55f2d2fdc63501ea940c04515
+  LIMEN_EXECUTION: ${{ secrets.BUILDBUDDY_API_KEY != '' && 'buildbuddy' || 'local' }}
+
 jobs:
   coverage:
     name: Coverage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Cache Bazel artifacts
-        uses: actions/cache@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          path: |
-            .bazel-cache/
-          key: ${{ runner.os }}-bazel-coverage-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-bazel-coverage-
-      - name: Build CI Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: .github/Dockerfile.ci
-          tags: limen-ci
-          load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # No later step needs the token.
+          persist-credentials: false
 
       - name: Generate coverage report
         # The script runs `bazel coverage` inside the CI container and
-        # places the resulting lcov at ./coverage.lcov. If no test
-        # targets exist yet, an empty coverage.lcov is produced.
+        # places the resulting lcov at ./coverage.lcov. Should no test
+        # target match, an empty coverage.lcov is produced.
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: .github/scripts/run-bazel-in-docker.sh coverage coverage
 
       - name: Generate HTML report
@@ -54,7 +54,7 @@ jobs:
             docker run --rm \
               -v "$PWD":/workspace \
               --user "$(id -u):$(id -g)" \
-              -w /workspace limen-ci \
+              -w /workspace "$CI_DOCKER_IMAGE" \
               genhtml coverage.lcov -o coverage_html \
                 --ignore-errors source,negative \
                 --legend \
@@ -64,17 +64,21 @@ jobs:
           fi
 
       - name: Upload to Codecov
-        if: ${{ hashFiles('coverage.lcov') != '' }}
-        uses: codecov/codecov-action@v4
+        # Codecov files a commit under the branch of its first upload and
+        # never moves it. Main advances by fast-forward, so a commit
+        # uploaded from its topic branch stays filed there when main
+        # reaches it, and main's coverage on Codecov stops at the last
+        # commit that was first seen on main. Uploading only from main
+        # makes the main push the first upload of every commit. Topic
+        # branches still produce and store the lcov and HTML reports.
+        if: ${{ hashFiles('coverage.lcov') != '' && github.ref == 'refs/heads/main' }}
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac  # v5.5.5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.lcov
           flags: unittests
           name: limen-coverage
-          # Surface upload failures as CI failures. Previously
-          # false to avoid masking unrelated issues during setup;
-          # now that the integration is working, silent upload
-          # failures must not pass.
+          # Surface upload failures as CI failures.
           fail_ci_if_error: true
           # Disable the default plugins (gcov auto-discovery, etc.).
           # Bazel produces the combined lcov in `coverage.lcov` and
@@ -88,7 +92,7 @@ jobs:
 
       - name: Upload HTML report
         if: ${{ hashFiles('coverage_html/**') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: coverage-report
           path: coverage_html/

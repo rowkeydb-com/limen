@@ -200,8 +200,14 @@ bazel-bin/examples/quickstart`.
 
 ## Building
 
-Limen builds with [Bazel](https://bazel.build/). Every CI test runs
-inside an Ubuntu 24.04 Docker image.
+Limen builds with [Bazel](https://bazel.build/) on the infrastructure
+shared with RowKeyDB (`rowkeydb-com/rowkeydb-build-infra`): Bazel runs
+in that repository's image, named by digest, with its options, which
+compile all code as C++23. In continuous integration BuildBuddy executes
+every action in the same image, and the actions of the dependencies are
+shared with the other repositories built on that infrastructure; a pull
+request from a fork, which GitHub gives no secret, is built on GitHub's
+machine alone.
 
 To run the test suite locally:
 
@@ -215,14 +221,16 @@ To run the test suite locally:
 # ThreadSanitizer:
 ./.github/scripts/run-bazel-in-docker.sh tsan test
 
+# MemorySanitizer:
+./.github/scripts/run-bazel-in-docker.sh msan test
+
 # clang-tidy:
 ./.github/scripts/run-bazel-in-docker.sh clang-tidy build
 ```
 
-On a developer's machine the script builds the `limen-ci` image on
-first invocation and reuses it from the local Docker cache on
-subsequent runs. In CI the same image is built per job by the
-`docker/build-push-action` step with GitHub Actions layer caching.
+The script pulls the image on first use. It runs the actions in the
+container, or on BuildBuddy with `LIMEN_EXECUTION=buildbuddy` and the
+key in `BUILDBUDDY_API_KEY` or `~/.config/buildbuddy/api-key`.
 
 ### Using Limen in a downstream Bazel project
 
@@ -232,7 +240,7 @@ v0.1.0), depend on it directly from source with a `git_override`:
 
 ```python
 # MODULE.bazel of your project
-bazel_dep(name = "limen", version = "0.1.0")
+bazel_dep(name = "limen", version = "0.2.0")
 git_override(
     module_name = "limen",
     remote = "https://github.com/rowkeydb-com/limen.git",
@@ -255,7 +263,7 @@ cc_library(
 Running `bazel build //...` after the `MODULE.bazel` update fetches
 Limen and its transitive dependencies. Once Limen is in the Bazel
 Central Registry, the `git_override` block goes away and
-`bazel_dep(name = "limen", version = "0.1.0")` is everything you need.
+`bazel_dep(name = "limen", version = "0.2.0")` is everything you need.
 
 ## Documentation
 

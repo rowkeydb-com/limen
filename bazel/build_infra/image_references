@@ -1,0 +1,12 @@
+# The files of this repository which name the image of
+# rowkeydb-com/rowkeydb-build-infra by digest. Each must name the image that
+# repository's image.bzl approves at the commit the shared options were
+# copied from; scripts/check.sh of that repository checks each, and checks
+# that no other file names another image in the three spellings it reads,
+# which its header lists.
+.github/scripts/run-bazel-in-docker.sh
+.github/workflows/build-test.yml
+.github/workflows/coverage.yml
+.github/workflows/sanitizers.yml
+.github/workflows/static-analysis.yml
+bazel/build_infra/shared.bazelrc

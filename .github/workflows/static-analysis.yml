@@ -1,61 +1,55 @@
 name: Static Analysis
 
+# Bazel runs in the image rowkeydb-com/rowkeydb-build-infra publishes,
+# named by digest below, on one of GitHub's machines. The checks which
+# need no Bazel run on that machine, in the same image, and the workflow
+# lint through a reviewdog action. Where the repository's BuildBuddy
+# secret reaches the run, as it reaches a push and a pull request from a
+# branch of this repository, BuildBuddy runs the actions, which share its
+# cache with the other repositories built on that infrastructure. GitHub
+# gives no secret to a pull request from a fork, whose actions therefore
+# run on GitHub's machine.
+
 on:
   push:
   pull_request:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
+env:
+  CI_DOCKER_IMAGE: ghcr.io/rowkeydb-com/rowkeydb-build-infra@sha256:c811e74114ebedf787178468c9a796e4e37ae7e55f2d2fdc63501ea940c04515
+  LIMEN_EXECUTION: ${{ secrets.BUILDBUDDY_API_KEY != '' && 'buildbuddy' || 'local' }}
+
 jobs:
   static-analysis:
     name: Static analysis
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Cache Bazel artifacts
-        uses: actions/cache@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          path: |
-            .bazel-cache/
-          key: ${{ runner.os }}-bazel-clang-tidy-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-bazel-clang-tidy-
-      - name: Build CI Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: .github/Dockerfile.ci
-          tags: limen-ci
-          load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # No later step needs the token.
+          persist-credentials: false
 
-      - name: Build under clang-tidy config (placeholder)
-        # Commit 1 does not have the clang-tidy aspect wired into the
-        # build. This step compiles with `--config=clang-tidy`, which
-        # currently resolves to `--config=clang` (thread-safety
-        # enforcement). The aspect that runs clang-tidy itself is
-        # added when the first library target lands, at which point
-        # this step starts performing real static analysis without
-        # any workflow change.
+      - name: Execute clang-tidy static analysis
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: .github/scripts/run-bazel-in-docker.sh clang-tidy build
 
-      - name: clang-format check
+      - name: Execute clang-format verification
         run: |
           docker run --rm -v "$PWD":/workspace --user "$(id -u):$(id -g)" \
-            -w /workspace limen-ci bash -c '
-              find . \( -name "*.cc" -o -name "*.h" \) \
+            -w /workspace "$CI_DOCKER_IMAGE" bash -c '
+              find . \( -name "*.cc" -o -name "*.h" -o -name "*.cxx" -o -name "*.hxx" \) \
                   -not -path "*/external/*" \
                   -not -path "*/bazel-*/*" \
                   -not -path "*/.cache/*" \
@@ -63,14 +57,31 @@ jobs:
                 | xargs -0 -r clang-format --dry-run --Werror
             '
 
-      - name: shellcheck
+      - name: Execute shellcheck verification
         run: |
           docker run --rm -v "$PWD":/workspace --user "$(id -u):$(id -g)" \
-            -w /workspace limen-ci bash -c '
+            -w /workspace "$CI_DOCKER_IMAGE" bash -c '
               find .github/scripts -name "*.sh" -print0 | xargs -0 -r shellcheck
             '
 
-      - name: actionlint
-        uses: reviewdog/action-actionlint@v1
+      - name: Execute build infrastructure verification
+        # scripts/check.sh, from the newest commit of the infrastructure's
+        # main, compares the copy of the shared options, the pin of the
+        # release and this repository's own build lines with the release
+        # MODULE.bazel names and with this repository's allowlist. It runs
+        # no Bazel.
+        run: |
+          infra="$RUNNER_TEMP/rowkeydb-build-infra"
+          rm -rf "$infra"
+          git clone --quiet https://github.com/rowkeydb-com/rowkeydb-build-infra.git "$infra"
+          docker run --rm -v "$PWD":/workspace -v "$infra":/infra:ro \
+            --user "$(id -u):$(id -g)" -w /workspace "$CI_DOCKER_IMAGE" \
+            /infra/scripts/check.sh /workspace
+
+      - name: Execute actionlint verification
+        uses: reviewdog/action-actionlint@619a81ec64ff8c0211cd6146eb2b21e8f1d7f440  # v1.81.1
         with:
           fail_level: error
+          # The warning that an action's Node runtime is deprecated names
+          # the action's own runtime, which its newest version decides.
+          actionlint_flags: -ignore 'node20.*deprecated'
