@@ -109,7 +109,7 @@ void LifoBlockingLimiter::AwaitBacklogSize(int n) const {
   mu_.Await(absl::Condition(&condition));
 }
 
-std::optional<Limiter::SlotGuard> LifoBlockingLimiter::TryAcquire(
+std::optional<Limiter::SlotGuard> LifoBlockingLimiter::DoTryAcquire(
     std::string_view context) {
   // Fast path: try the delegate immediately.
   if (auto inner = delegate_->TryAcquire(context); inner) {

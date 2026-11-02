@@ -78,7 +78,7 @@ void BlockingLimiter::AwaitQueueSize(int n) const {
   mu_.Await(absl::Condition(&condition));
 }
 
-std::optional<Limiter::SlotGuard> BlockingLimiter::TryAcquire(
+std::optional<Limiter::SlotGuard> BlockingLimiter::DoTryAcquire(
     std::string_view context) {
   // Fast path: try the delegate immediately. If it admits, wrap
   // the resulting SlotGuard in an outer SlotGuard that carries

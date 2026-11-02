@@ -52,7 +52,7 @@ namespace limen {
 // algorithm sees no sample for a bypassed call.
 //
 // Concrete subclasses implement `DoAcquire`, which decides whether
-// to admit a non-bypass call. The base class's `TryAcquire`
+// to admit a non-bypass call. The base class's `DoTryAcquire`
 // handles the bypass branch, the counter bookkeeping, and the
 // SlotGuard construction; subclasses only own the gate-check
 // policy.
@@ -81,8 +81,6 @@ class AbstractLimiter : public Limiter {
   static constexpr int kStatusCount = 5;
 
   using BypassPredicate = std::function<bool(std::string_view context)>;
-
-  std::optional<SlotGuard> TryAcquire(std::string_view context = {}) final;
 
   // Wait-free reads of the limiter's current state. Safe to call
   // from any thread without coordination.
@@ -115,6 +113,8 @@ class AbstractLimiter : public Limiter {
   };
 
   explicit AbstractLimiter(Params params);
+
+  std::optional<SlotGuard> DoTryAcquire(std::string_view context) final;
 
   // Subclasses implement the per-call admission gate. On admission,
   // the override must atomically reserve a slot — that is, leave

@@ -122,8 +122,6 @@ class LifoBlockingLimiter final : public Limiter {
         std::chrono::seconds(1);
   };
 
-  std::optional<SlotGuard> TryAcquire(std::string_view context = {}) override;
-
   // Current number of callers parked on the wait deque.
   int BacklogSize() const ABSL_LOCKS_EXCLUDED(mu_);
 
@@ -141,6 +139,8 @@ class LifoBlockingLimiter final : public Limiter {
   }
 
  protected:
+  std::optional<SlotGuard> DoTryAcquire(std::string_view context) override;
+
   void OnSlotComplete(CompletionStatus status, int64_t start_time_ns,
                       int inflight_at_acquire, bool bypassed,
                       int partition_index) override;

@@ -70,7 +70,7 @@ AbstractLimiter::AbstractLimiter(Params params)
   RegisterObservableInstruments();
 }
 
-std::optional<Limiter::SlotGuard> AbstractLimiter::TryAcquire(
+std::optional<Limiter::SlotGuard> AbstractLimiter::DoTryAcquire(
     std::string_view context) {
   // Bypass: the call opts out of admission control entirely. The
   // bypassed counter is incremented here at acquire time (matching

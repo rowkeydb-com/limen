@@ -93,8 +93,6 @@ class BlockingLimiter final : public Limiter {
     std::chrono::milliseconds timeout_ = kMaxTimeout;
   };
 
-  std::optional<SlotGuard> TryAcquire(std::string_view context = {}) override;
-
   // Current number of callers parked on the wait queue. Wait-free
   // approximate read; mostly useful for tests and for operator
   // observability (a sustained non-zero value signals back-pressure
@@ -108,6 +106,8 @@ class BlockingLimiter final : public Limiter {
   void AwaitQueueSize(int n) const ABSL_LOCKS_EXCLUDED(mu_);
 
  protected:
+  std::optional<SlotGuard> DoTryAcquire(std::string_view context) override;
+
   void OnSlotComplete(CompletionStatus status, int64_t start_time_ns,
                       int inflight_at_acquire, bool bypassed,
                       int partition_index) override;

@@ -67,10 +67,16 @@ class Limiter {
   // SlotGuard on admission or std::nullopt on rejection. The caller
   // must invoke exactly one completion method on the returned
   // SlotGuard (or rely on the destructor default of OnIgnore).
-  virtual std::optional<SlotGuard> TryAcquire(
-      std::string_view context = {}) = 0;
+  std::optional<SlotGuard> TryAcquire(std::string_view context);
+
+  // TryAcquire with the empty context.
+  std::optional<SlotGuard> TryAcquire();
 
  protected:
+  // Implements both TryAcquire overloads, which forward here; the
+  // overload without a context passes an empty one.
+  virtual std::optional<SlotGuard> DoTryAcquire(std::string_view context) = 0;
+
   // Called by SlotGuard on completion (either an explicit
   // On{Success,Ignore,Dropped} method invocation or the
   // destructor default). Implementations decrement the in-flight
@@ -191,6 +197,15 @@ inline Limiter::SlotGuard Limiter::MakeSlot(Limiter* limiter,
                                             int partition_index) {
   return SlotGuard{limiter, start_time_ns, inflight_at_acquire, bypassed,
                    partition_index};
+}
+
+inline std::optional<Limiter::SlotGuard> Limiter::TryAcquire(
+    std::string_view context) {
+  return DoTryAcquire(context);
+}
+
+inline std::optional<Limiter::SlotGuard> Limiter::TryAcquire() {
+  return DoTryAcquire({});
 }
 
 }  // namespace limen

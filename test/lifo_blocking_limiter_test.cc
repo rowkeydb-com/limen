@@ -343,14 +343,6 @@ class BlockableDelegate : public Limiter {
   explicit BlockableDelegate(std::unique_ptr<Limiter> inner)
       : inner_(std::move(inner)) {}
 
-  std::optional<SlotGuard> TryAcquire(std::string_view context) override {
-    int const n = call_count_.fetch_add(1, std::memory_order_relaxed);
-    if (n >= block_after_call_.load(std::memory_order_relaxed)) {
-      proceed_.WaitForNotification();
-    }
-    return inner_->TryAcquire(context);
-  }
-
   void SetBlockAfterCall(int n) {
     block_after_call_.store(n, std::memory_order_relaxed);
   }
@@ -358,6 +350,14 @@ class BlockableDelegate : public Limiter {
   void Signal() { proceed_.Notify(); }
 
  protected:
+  std::optional<SlotGuard> DoTryAcquire(std::string_view context) override {
+    int const n = call_count_.fetch_add(1, std::memory_order_relaxed);
+    if (n >= block_after_call_.load(std::memory_order_relaxed)) {
+      proceed_.WaitForNotification();
+    }
+    return inner_->TryAcquire(context);
+  }
+
   // BlockableDelegate returns the inner's SlotGuards directly,
   // so its own OnSlotComplete is never invoked. Provide a no-op
   // override to satisfy the pure-virtual.
