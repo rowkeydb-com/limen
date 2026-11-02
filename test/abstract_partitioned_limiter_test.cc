@@ -24,10 +24,10 @@
 #include "opentelemetry/sdk/metrics/meter_provider.h"
 #include "opentelemetry/sdk/metrics/metric_reader.h"
 #include "opentelemetry/sdk/metrics/push_metric_exporter.h"
+#include "test/allocation_counter.h"
 #include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <cstdlib>
 #include <latch>
 #include <map>
 #include <memory>
@@ -37,55 +37,6 @@
 #include <thread>
 #include <utility>
 #include <vector>
-
-namespace {
-
-// Allocation counter for the hot-path no-allocation test.
-std::atomic<int> g_alloc_count{0};
-std::atomic<bool> g_alloc_tracking{false};
-
-// RAII guard: turns allocation tracking on for its lifetime and
-// guarantees the flag is cleared even if the enclosing test
-// returns early. Prevents one test leaking the tracking flag
-// into another test in the same binary.
-class AllocTrackingScope {
- public:
-  AllocTrackingScope() {
-    g_alloc_count.store(0, std::memory_order_relaxed);
-    g_alloc_tracking.store(true, std::memory_order_relaxed);
-  }
-  ~AllocTrackingScope() {
-    g_alloc_tracking.store(false, std::memory_order_relaxed);
-  }
-  AllocTrackingScope(AllocTrackingScope const&) = delete;
-  AllocTrackingScope& operator=(AllocTrackingScope const&) = delete;
-};
-
-}  // namespace
-
-void* operator new(std::size_t size) {
-  if (g_alloc_tracking.load(std::memory_order_relaxed)) {
-    g_alloc_count.fetch_add(1, std::memory_order_relaxed);
-  }
-  void* p = std::malloc(size);
-  if (p == nullptr) std::abort();
-  return p;
-}
-
-void operator delete(void* p) noexcept { std::free(p); }
-void operator delete(void* p, std::size_t /*size*/) noexcept { std::free(p); }
-
-void* operator new[](std::size_t size) {
-  if (g_alloc_tracking.load(std::memory_order_relaxed)) {
-    g_alloc_count.fetch_add(1, std::memory_order_relaxed);
-  }
-  void* p = std::malloc(size);
-  if (p == nullptr) std::abort();
-  return p;
-}
-
-void operator delete[](void* p) noexcept { std::free(p); }
-void operator delete[](void* p, std::size_t /*size*/) noexcept { std::free(p); }
 
 namespace limen {
 namespace {
@@ -773,14 +724,12 @@ TEST(AbstractPartitionedLimiterTest, NoAllocationOnAcquireRelease) {
                      .value();
 
   constexpr int kIterations = 10000;
-  {
-    AllocTrackingScope tracking;
-    for (int i = 0; i < kIterations; ++i) {
-      auto slot = limiter->TryAcquire("live");
-      if (slot) slot->OnSuccess();
-    }
+  AllocationCounter allocations;
+  for (int i = 0; i < kIterations; ++i) {
+    auto slot = limiter->TryAcquire("live");
+    if (slot) slot->OnSuccess();
   }
-  EXPECT_EQ(g_alloc_count.load(std::memory_order_relaxed), 0);
+  EXPECT_EQ(allocations.Stop(), 0);
 }
 
 }  // namespace

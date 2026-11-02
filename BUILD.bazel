@@ -61,6 +61,28 @@ cc_library(
     ],
 )
 
+# Counts the global operator new and operator new[] calls of a test; see
+# test/allocation_counter.h. Linked whole and statically, so that its
+# replacements of the global allocation functions are part of every test
+# executable that depends on it.
+cc_library(
+    name = "allocation_counter",
+    testonly = True,
+    srcs = ["test/allocation_counter.cc"],
+    hdrs = ["test/allocation_counter.h"],
+    alwayslink = True,
+    linkstatic = True,
+)
+
+cc_test(
+    name = "allocation_counter_test",
+    srcs = ["test/allocation_counter_test.cc"],
+    deps = [
+        ":allocation_counter",
+        "@googletest//:gtest_main",
+    ],
+)
+
 cc_test(
     name = "fixed_limit_test",
     srcs = ["test/fixed_limit_test.cc"],
@@ -138,6 +160,7 @@ cc_test(
     name = "windowed_limit_test",
     srcs = ["test/windowed_limit_test.cc"],
     deps = [
+        ":allocation_counter",
         ":limen",
         "@googletest//:gtest_main",
     ],
@@ -156,6 +179,7 @@ cc_test(
     name = "abstract_limiter_test",
     srcs = ["test/abstract_limiter_test.cc"],
     deps = [
+        ":allocation_counter",
         ":limen",
         "@googletest//:gtest_main",
         "@opentelemetry-cpp//sdk/src/metrics",
@@ -166,6 +190,7 @@ cc_test(
     name = "simple_limiter_test",
     srcs = ["test/simple_limiter_test.cc"],
     deps = [
+        ":allocation_counter",
         ":limen",
         "@googletest//:gtest_main",
     ],
@@ -175,6 +200,7 @@ cc_test(
     name = "abstract_partitioned_limiter_test",
     srcs = ["test/abstract_partitioned_limiter_test.cc"],
     deps = [
+        ":allocation_counter",
         ":limen",
         "@googletest//:gtest_main",
         "@opentelemetry-cpp//sdk/src/metrics",
@@ -212,6 +238,7 @@ cc_test(
     name = "codel_filter_test",
     srcs = ["test/codel_filter_test.cc"],
     deps = [
+        ":allocation_counter",
         ":limen",
         "@googletest//:gtest_main",
         "@opentelemetry-cpp//sdk/src/metrics",

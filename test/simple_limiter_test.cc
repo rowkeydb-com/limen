@@ -18,9 +18,9 @@
 #include "limen/settable_limit.h"
 #include "absl/status/status.h"
 #include "gtest/gtest.h"
+#include "test/allocation_counter.h"
 #include <atomic>
 #include <cstdint>
-#include <cstdlib>
 #include <latch>
 #include <memory>
 #include <optional>
@@ -28,46 +28,6 @@
 #include <thread>
 #include <utility>
 #include <vector>
-
-namespace {
-
-// Allocation counter for `NoAllocationOnAcquireRelease`. Toggled
-// around the timed loop so unrelated allocations from gtest, the
-// SDK constructor, etc. do not pollute the count. The replacements
-// cover only the sized, non-aligned forms; no type reachable from
-// `TryAcquire` / SlotGuard completion is currently over-aligned.
-std::atomic<int> g_alloc_count{0};
-std::atomic<bool> g_alloc_tracking{false};
-
-}  // namespace
-
-void* operator new(std::size_t size) {
-  if (g_alloc_tracking.load(std::memory_order_relaxed)) {
-    g_alloc_count.fetch_add(1, std::memory_order_relaxed);
-  }
-  void* p = std::malloc(size);
-  if (p == nullptr) {
-    std::abort();
-  }
-  return p;
-}
-
-void operator delete(void* p) noexcept { std::free(p); }
-void operator delete(void* p, std::size_t /*size*/) noexcept { std::free(p); }
-
-void* operator new[](std::size_t size) {
-  if (g_alloc_tracking.load(std::memory_order_relaxed)) {
-    g_alloc_count.fetch_add(1, std::memory_order_relaxed);
-  }
-  void* p = std::malloc(size);
-  if (p == nullptr) {
-    std::abort();
-  }
-  return p;
-}
-
-void operator delete[](void* p) noexcept { std::free(p); }
-void operator delete[](void* p, std::size_t /*size*/) noexcept { std::free(p); }
 
 namespace limen {
 namespace {
@@ -295,16 +255,14 @@ TEST(SimpleLimiterTest, NoAllocationOnAcquireRelease) {
                      .value();
 
   constexpr int kIterations = 10000;
-  g_alloc_count.store(0, std::memory_order_relaxed);
-  g_alloc_tracking.store(true, std::memory_order_relaxed);
+  AllocationCounter allocations;
   for (int i = 0; i < kIterations; ++i) {
     auto slot = limiter->TryAcquire();
     if (slot) {
       slot->OnSuccess();
     }
   }
-  g_alloc_tracking.store(false, std::memory_order_relaxed);
-  EXPECT_EQ(g_alloc_count.load(std::memory_order_relaxed), 0);
+  EXPECT_EQ(allocations.Stop(), 0);
 }
 
 TEST(SimpleLimiterTest, AdaptsToLimitChange) {

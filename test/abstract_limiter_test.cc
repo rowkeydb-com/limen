@@ -23,57 +23,15 @@
 #include "opentelemetry/sdk/metrics/meter_provider.h"
 #include "opentelemetry/sdk/metrics/metric_reader.h"
 #include "opentelemetry/sdk/metrics/push_metric_exporter.h"
-#include <atomic>
+#include "test/allocation_counter.h"
 #include <chrono>
 #include <cstdint>
-#include <cstdlib>
 #include <map>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
-
-namespace {
-
-// Allocation counter for `NoSynchronousOtelCallOnHotPath`. The
-// `tracking` flag is toggled around the timed loop so unrelated
-// allocations from gtest, the SDK constructor, etc. do not pollute
-// the count. The replacements cover only the sized, non-aligned
-// forms; no type reachable from `TryAcquire` / completion methods
-// is currently over-aligned.
-std::atomic<int> g_alloc_count{0};
-std::atomic<bool> g_alloc_tracking{false};
-
-}  // namespace
-
-void* operator new(std::size_t size) {
-  if (g_alloc_tracking.load(std::memory_order_relaxed)) {
-    g_alloc_count.fetch_add(1, std::memory_order_relaxed);
-  }
-  void* p = std::malloc(size);
-  if (p == nullptr) {
-    std::abort();
-  }
-  return p;
-}
-
-void operator delete(void* p) noexcept { std::free(p); }
-void operator delete(void* p, std::size_t /*size*/) noexcept { std::free(p); }
-
-void* operator new[](std::size_t size) {
-  if (g_alloc_tracking.load(std::memory_order_relaxed)) {
-    g_alloc_count.fetch_add(1, std::memory_order_relaxed);
-  }
-  void* p = std::malloc(size);
-  if (p == nullptr) {
-    std::abort();
-  }
-  return p;
-}
-
-void operator delete[](void* p) noexcept { std::free(p); }
-void operator delete[](void* p, std::size_t /*size*/) noexcept { std::free(p); }
 
 namespace limen {
 namespace {
@@ -469,16 +427,13 @@ TEST(AbstractLimiterTest, NoAllocationOnHotPath) {
                           /*bypass=*/nullptr, h.provider);
 
   constexpr int kIterations = 1000;
-  g_alloc_count.store(0, std::memory_order_relaxed);
-  g_alloc_tracking.store(true, std::memory_order_relaxed);
+  AllocationCounter allocations;
   for (int i = 0; i < kIterations; ++i) {
     auto l = limiter->TryAcquire();
     ASSERT_TRUE(l);
     l->OnSuccess();
   }
-  g_alloc_tracking.store(false, std::memory_order_relaxed);
-
-  EXPECT_EQ(g_alloc_count.load(std::memory_order_relaxed), 0);
+  EXPECT_EQ(allocations.Stop(), 0);
 }
 
 }  // namespace

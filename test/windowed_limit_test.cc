@@ -17,62 +17,15 @@
 #include "limen/limit.h"
 #include "absl/status/status.h"
 #include "gtest/gtest.h"
+#include "test/allocation_counter.h"
 #include <atomic>
 #include <cstdint>
-#include <cstdlib>
 #include <latch>
 #include <memory>
 #include <string>
 #include <thread>
 #include <utility>
 #include <vector>
-
-namespace {
-
-// Allocation counter for `NoAllocationAfterConstruction`. The
-// `tracking` flag is set after the limiter is constructed and reset
-// before joining the test; while it is set every global `new` /
-// `new[]` call increments the count.
-//
-// The replacements cover only the sized, non-aligned forms. None of
-// the types reachable from `OnSample` are over-aligned, so the
-// aligned overloads are never selected by the compiler today. If a
-// future change adds an `alignas(N > __STDCPP_DEFAULT_NEW_ALIGNMENT__)`
-// member, the aligned `operator new(size_t, std::align_val_t)`
-// overload must be added here too or this test will silently
-// stop counting that allocation.
-std::atomic<int> g_alloc_count{0};
-std::atomic<bool> g_alloc_tracking{false};
-
-}  // namespace
-
-void* operator new(std::size_t size) {
-  if (g_alloc_tracking.load(std::memory_order_relaxed)) {
-    g_alloc_count.fetch_add(1, std::memory_order_relaxed);
-  }
-  void* p = std::malloc(size);
-  if (p == nullptr) {
-    std::abort();
-  }
-  return p;
-}
-
-void operator delete(void* p) noexcept { std::free(p); }
-void operator delete(void* p, std::size_t /*size*/) noexcept { std::free(p); }
-
-void* operator new[](std::size_t size) {
-  if (g_alloc_tracking.load(std::memory_order_relaxed)) {
-    g_alloc_count.fetch_add(1, std::memory_order_relaxed);
-  }
-  void* p = std::malloc(size);
-  if (p == nullptr) {
-    std::abort();
-  }
-  return p;
-}
-
-void operator delete[](void* p) noexcept { std::free(p); }
-void operator delete[](void* p, std::size_t /*size*/) noexcept { std::free(p); }
 
 namespace limen {
 namespace {
@@ -334,15 +287,13 @@ TEST(WindowedLimitTest, NoAllocationAfterConstruction) {
                       .Build(std::move(delegate))
                       .value();
 
-  g_alloc_count.store(0, std::memory_order_relaxed);
-  g_alloc_tracking.store(true, std::memory_order_relaxed);
+  AllocationCounter allocations;
 
   for (int i = 0; i < 10'000; ++i) {
     windowed->OnSample(static_cast<int64_t>(i) * 100, 500'000, 1, false);
   }
 
-  g_alloc_tracking.store(false, std::memory_order_relaxed);
-  EXPECT_EQ(g_alloc_count.load(std::memory_order_relaxed), 0);
+  EXPECT_EQ(allocations.Stop(), 0);
 }
 
 TEST(WindowedLimitTest, ConcurrentSamplesAcrossBoundary) {
