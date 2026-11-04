@@ -45,6 +45,15 @@ jobs:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: .github/scripts/run-bazel-in-docker.sh clang-tidy build
 
+      # The repository has no Go, so the check is that Gazelle finds no
+      # BUILD file to write: each must be in the form buildifier gives it.
+      # On GitHub's machines, where nothing persists between runs, it
+      # fetches Gazelle's Go repositories each time.
+      - name: Execute Gazelle synchronization verification
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: .github/scripts/run-bazel-in-docker.sh gazelle test
+
       - name: Execute clang-format verification
         run: |
           docker run --rm -v "$PWD":/workspace --user "$(id -u):$(id -g)" \

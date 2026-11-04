@@ -17,15 +17,25 @@ module(
 # are copied from the same commit. A development dependency, as the
 # design's section on the shared Bazel module requires of a library: a
 # consumer of Limen need not find the module in any registry.
-bazel_dep(name = "rowkeydb_build_infra", version = "0.9.0", dev_dependency = True)
-archive_override(
+bazel_dep(name = "rowkeydb_build_infra", version = "0.10.0", dev_dependency = True)
+git_override(
     module_name = "rowkeydb_build_infra",
-    integrity = "sha256-D7t8EBse/u0hZh5Dnbt8BQOfAHtEdd/f8+ZeY+00tXQ=",
-    strip_prefix = "rowkeydb-build-infra-0e346a1b7cc6f85484aeb7983614bf13d22c227a",
-    urls = [
-        "https://github.com/rowkeydb-com/rowkeydb-build-infra/releases/download/v0.9.0/rowkeydb-build-infra-0e346a1b7cc6f85484aeb7983614bf13d22c227a.tar.gz",
-    ],
+    commit = "1258624cf739f3802383fc4a22300fc3a729d58f",
+    remote = "https://github.com/rowkeydb-com/rowkeydb-build-infra.git",
 )
+
+# --- Go ---
+# Gazelle, whose check of //bazel/gazelle finds no Go here, and so
+# requires only that each BUILD file be in the form buildifier gives it.
+# rules_go, Gazelle and the Go SDK are at the versions
+# rowkeydb_build_infra approves, and like it they are development
+# dependencies: the library has no Go, and a consumer of it needs none of
+# them. Without Go there is nothing for nogo to check.
+bazel_dep(name = "rules_go", version = "0.64.1", dev_dependency = True)
+bazel_dep(name = "gazelle", version = "0.54.0", dev_dependency = True)
+
+go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk", dev_dependency = True)
+go_sdk.download(version = "1.27.3")
 
 # --- clang-tidy ---
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
