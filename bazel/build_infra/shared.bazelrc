@@ -1,5 +1,5 @@
-# Copied from rowkeydb-com/rowkeydb-build-infra at 0e346a1b7cc6f85484aeb7983614bf13d22c227a.
-# SHA-256 of the lines below: 0eaa3c6332a773e6b579b77ae55dfcca3ad70106e9f211d525a000a8caf33a30.
+# Copied from rowkeydb-com/rowkeydb-build-infra at 974eee0db723f289d08f21497bb61b59fdab9ac0.
+# SHA-256 of the lines below: f759cb9fa8b7b84bd61040581344b7618f63bc2a9e1942701e143c5c31f54454.
 # Copyright 2019 Google LLC (original file)
 # Copyright 2026 Chanzo (modifications)
 #
@@ -118,6 +118,19 @@ build --features=external_include_paths
 # for the check does not get it either. Tools built for the host keep each
 # package's own setting, the same in every consumer.
 build --features=-layering_check
+
+# Go without cgo, in every Go build of every consumer, Gazelle included.
+# With cgo, the C code of the Go runtime is compiled with the C options of
+# the target configuration, those of MemorySanitizer included, and
+# MemorySanitizer then reports reads of uninitialized memory in the
+# runtime's signal handler which are false: Go code wrote that memory, and
+# MemorySanitizer does not see writes made by Go code. The option names
+# rules_go by its canonical repository name, which is the same in every
+# consumer, whatever name the consumer gives the module. rules_go resets
+# the setting for the tools other than Go which its rules run, so a tool
+# which a consumer's other rules also run, protoc for example, is built
+# twice: once with the setting and once without it.
+build --@@rules_go+//go/config:pure
 
 # Actions run with a fixed PATH, /bin:/usr/bin:/usr/local/bin, and without
 # the client's LD_LIBRARY_PATH, so that no action's key holds the client's

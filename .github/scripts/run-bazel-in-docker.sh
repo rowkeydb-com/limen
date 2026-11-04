@@ -2,8 +2,15 @@
 # Run a Bazel command inside the Limen CI Docker container.
 #
 # Usage: run-bazel-in-docker.sh <config> <command> [bazel_args...]
-#   config:  release | asan-ubsan | tsan | msan | clang-tidy | coverage
+#   config:  release | asan-ubsan | tsan | msan | clang-tidy | coverage |
+#            gazelle
 #   command: build | test | coverage
+#
+# Every configuration runs on //... but gazelle, which runs
+# //bazel/gazelle:gazelle_test, the check that the BUILD files of the Go
+# code are the ones Gazelle writes. gazelle passes no --config, so that
+# Gazelle is built with the shared options alone, as in every repository
+# which shares them.
 #
 # The image is the one rowkeydb-com/rowkeydb-build-infra publishes, named
 # by its digest below and pulled on first use; CI_DOCKER_IMAGE names
@@ -48,7 +55,7 @@ trap cleanup EXIT
 
 if [ $# -lt 2 ]; then
     echo "Usage: $0 <config> <command> [bazel_args...]" >&2
-    echo "  config:  release | asan-ubsan | tsan | msan | clang-tidy | coverage" >&2
+    echo "  config:  release | asan-ubsan | tsan | msan | clang-tidy | coverage | gazelle" >&2
     echo "  command: build | test | coverage" >&2
     exit 1
 fi
@@ -58,7 +65,7 @@ COMMAND="$2"
 shift 2
 
 case "$CONFIG" in
-    release|asan-ubsan|tsan|msan|clang-tidy|coverage) ;;
+    release|asan-ubsan|tsan|msan|clang-tidy|coverage|gazelle) ;;
     *)
         echo "Error: invalid config '$CONFIG'" >&2
         exit 1
@@ -72,6 +79,15 @@ case "$COMMAND" in
         exit 1
         ;;
 esac
+
+# What the command runs on, and the configuration it names.
+TARGET="//..."
+CONFIG_OPTS=(--config="$CONFIG")
+if [ "$CONFIG" = "gazelle" ]; then
+    TARGET="//bazel/gazelle:gazelle_test"
+    CONFIG_OPTS=()
+fi
+readonly TARGET
 
 EXECUTION="${LIMEN_EXECUTION:-local}"
 case "$EXECUTION" in
@@ -132,11 +148,17 @@ BAZEL_OPTS+=(--disk_cache=/tmp/bazel-disk-cache)
 # The same for what Bazel downloads, the dependencies, which would
 # otherwise be fetched afresh by every container. The repository cache is
 # content addressed as well, and made to be shared, the steps which run
-# side by side included. LIMEN_REPOSITORY_CACHE puts it elsewhere.
-HOST_REPOSITORY_CACHE="${LIMEN_REPOSITORY_CACHE:-$HOME/.cache/limen-bazel-repository}"
+# side by side included, and so are the four repositories which share
+# rowkeydb-build-infra, which use one directory. Its contents cache keeps
+# the repositories Bazel fetched and marked reproducible, Gazelle's tools
+# and Go modules among them, so that a later run reuses them without
+# fetching or building them again; Bazel 8 turns it on only when asked.
+# LIMEN_REPOSITORY_CACHE puts it elsewhere.
+HOST_REPOSITORY_CACHE="${LIMEN_REPOSITORY_CACHE:-$HOME/.cache/bazel-repository}"
 mkdir -p "$HOST_REPOSITORY_CACHE"
 DOCKER_OPTS+=(-v "$HOST_REPOSITORY_CACHE:/tmp/bazel-repository-cache")
 BAZEL_OPTS+=(--repository_cache=/tmp/bazel-repository-cache)
+BAZEL_OPTS+=(--repo_contents_cache=/tmp/bazel-repository-cache/contents)
 
 if [ -n "${BAZEL_REMOTE_CACHE:-}" ]; then
     BAZEL_OPTS+=(--remote_cache="$BAZEL_REMOTE_CACHE" --remote_upload_local_results=true)
@@ -239,7 +261,8 @@ else
     # Docker runs the command as given, word by word, with no shell to
     # read it again.
     docker run "${DOCKER_OPTS[@]}" "$DOCKER_IMAGE" \
-        "${PRIORITY[@]}" bazel "$COMMAND" "${BAZEL_OPTS[@]}" --config="$CONFIG" "$@" //...
+        "${PRIORITY[@]}" bazel "$COMMAND" "${BAZEL_OPTS[@]}" \
+        "${CONFIG_OPTS[@]+"${CONFIG_OPTS[@]}"}" "$@" "$TARGET"
 fi
 rc=$?
 set -e

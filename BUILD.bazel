@@ -8,6 +8,9 @@
 
 package(default_visibility = ["//visibility:public"])
 
+# The Gazelle test of //bazel/gazelle finds the repository through it.
+exports_files(["MODULE.bazel"])
+
 cc_library(
     name = "limen",
     srcs = [
@@ -70,8 +73,8 @@ cc_library(
     testonly = True,
     srcs = ["test/allocation_counter.cc"],
     hdrs = ["test/allocation_counter.h"],
-    alwayslink = True,
     linkstatic = True,
+    alwayslink = True,
 )
 
 cc_test(

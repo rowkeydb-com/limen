@@ -1,0 +1,8 @@
+# The Gazelle targets, as rowkeydb_build_infra defines them for every
+# consumer: `bazel run //bazel/gazelle:gazelle` writes the BUILD files of
+# the Go code, and gazelle_test fails when one differs from what Gazelle
+# would write. With no Go, Gazelle writes nothing.
+
+load("@rowkeydb_build_infra//gazelle:defs.bzl", "gazelle_targets")
+
+gazelle_targets()
