@@ -195,8 +195,7 @@ A compilable version of the example above (without the `MyRpcLib`
 placeholder; the request is a `sleep_for` standing in for real
 handler work) lives at
 [`examples/quickstart.cc`](examples/quickstart.cc). Build and run
-it with `bazel build //examples:quickstart &&
-bazel-bin/examples/quickstart`.
+it with `bazel run --config=amd64 //examples:quickstart`.
 
 ## Building
 

@@ -1,5 +1,5 @@
-# Copied from rowkeydb-com/rowkeydb-build-infra at 974eee0db723f289d08f21497bb61b59fdab9ac0.
-# SHA-256 of the lines below: f759cb9fa8b7b84bd61040581344b7618f63bc2a9e1942701e143c5c31f54454.
+# Copied from rowkeydb-com/rowkeydb-build-infra at 0ff50e4c46552c8b83516693fb9525532da592d6.
+# SHA-256 of the lines below: 6552e852d6bdbadfa79f1bd0a9998bccade6c7c7b5b494f09b1135bb02e37b85.
 # Copyright 2019 Google LLC (original file)
 # Copyright 2026 Chanzo (modifications)
 #
@@ -85,6 +85,15 @@ build:linux --per_file_copt=external/.*@-w
 build:linux --host_per_file_copt=external/.*@-w
 # Host tools (protoc, grpc_cpp_plugin) also need C++23.
 build:linux --host_cxxopt=-std=c++23
+# Every C++ link is made by lld, the host tools' included. Bazel's
+# generated toolchain passes a -fuse-ld option of its own, which names lld
+# when the image in which Bazel first configured it, once for each output
+# base, held lld, and gold otherwise. This option comes after it on every
+# link command line, and GCC and clang both take the last -fuse-ld they
+# are given, so neither a change of image nor an output base made in an
+# earlier image can change the linker unnoticed. --config=lto names gold
+# instead. Go's links are made by Go's own linker and name none.
+build:linux --linkopt=-fuse-ld=lld --host_linkopt=-fuse-ld=lld
 
 # The options of all code, a consumer's own and its dependencies' alike,
 # the same in every consumer, so that the compilations of a dependency are
@@ -167,6 +176,10 @@ build:release --compilation_mode=opt
 # --config=lto. -flto=auto lets the link use every processor.
 build:lto --copt=-flto=auto
 build:lto --linkopt=-flto=auto
+# lld cannot link the objects GCC compiles for link-time optimization, so
+# this link is made by gold, which reads them through GCC's plugin. The
+# option comes after build:linux's -fuse-ld=lld and so replaces it.
+build:lto --linkopt=-fuse-ld=gold
 # Embed a build-id so that a stripped binary and its split-out debug file
 # can be matched for offline symbolization.
 build:lto --linkopt=-Wl,--build-id=sha1
@@ -321,7 +334,12 @@ build --experimental_disk_cache_gc_max_size=50G
 # name it as well as those of remote ones. image.bzl holds the same digest
 # for the execution platforms in buildbuddy/; scripts/check.sh compares
 # them.
-build --remote_default_exec_properties=container-image=docker://ghcr.io/rowkeydb-com/rowkeydb-build-infra@sha256:c811e74114ebedf787178468c9a796e4e37ae7e55f2d2fdc63501ea940c04515
+build --remote_default_exec_properties=container-image=docker://ghcr.io/rowkeydb-com/rowkeydb-build-infra@sha256:a544f120db73d9634592e4b9e02e8c853333dbd22f59d376f31af515eecb8758
+
+# When an output the build still needs has left the remote cache or the
+# disk cache, run the action that made it again, instead of starting the
+# whole build again.
+build --rewind_lost_inputs
 
 # BuildBuddy Remote Build Execution Configuration. The key is in no file of
 # a consumer: Bazel asks the consumer's credential helper for it, which
@@ -336,7 +354,17 @@ build:buildbuddy --remote_cache=grpcs://remote.buildbuddy.io
 build:buildbuddy --bes_backend=grpcs://remote.buildbuddy.io
 build:buildbuddy --bes_results_url=https://app.buildbuddy.io/invocation/
 build:buildbuddy --remote_timeout=3600
-build:buildbuddy --remote_download_toplevel
+# Download only what Bazel itself needs, such as the test logs, and none of
+# the outputs, which the actions read from the remote cache: a machine that
+# only relays BuildBuddy's traffic would otherwise download every top-level
+# output, test binaries included, which no step reads. A job that reads a
+# built file on its own machine asks for that file on its own command line.
+# The coverage report is asked for below. The option is BuildBuddy's alone:
+# in deciding what to download, Bazel counts the disk cache as a remote
+# cache, so for every command it would also leave out the outputs of a
+# build the disk cache serves, which a script that builds on its own
+# machine and reads the result does not ask for.
+build:buildbuddy --remote_download_minimal
 build:buildbuddy --jobs=100
 build:buildbuddy --remote_cache_compression
 build:buildbuddy --experimental_remote_cache_compression_threshold=100
@@ -356,12 +384,8 @@ build:buildbuddy-msan --config=buildbuddy
 build:buildbuddy-msan --extra_execution_platforms=@rowkeydb_build_infra//buildbuddy:executor_msan
 coverage:buildbuddy --experimental_split_coverage_postprocessing
 coverage:buildbuddy --experimental_fetch_all_coverage_outputs
-# A test or coverage run downloads only what Bazel itself needs, such as
-# the test logs, and not the test binaries, which run on the executors and
-# which no step reads afterwards; a build still downloads its top-level
-# outputs. The combined coverage report, which the consumers copy out after
-# a coverage run, is always downloaded.
-test:buildbuddy --remote_download_minimal
+# The combined coverage report, which the consumers copy out after a
+# coverage run, is always downloaded.
 coverage:buildbuddy --remote_download_regex=.*/_coverage/_coverage_report\.dat$
 
 # Hardware configuration profiles, used by CI to fit Bazel's analysis and

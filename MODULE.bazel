@@ -17,13 +17,13 @@ module(
 # are copied from the same commit. A development dependency, as the
 # design's section on the shared Bazel module requires of a library: a
 # consumer of Limen need not find the module in any registry.
-bazel_dep(name = "rowkeydb_build_infra", version = "0.10.0", dev_dependency = True)
+bazel_dep(name = "rowkeydb_build_infra", version = "0.11.0", dev_dependency = True)
 archive_override(
     module_name = "rowkeydb_build_infra",
-    integrity = "sha256-3BRojbO4yHY0jZpZQATj5JxP8rUQC9mUq4dL1/ZTbxs=",
-    strip_prefix = "rowkeydb-build-infra-974eee0db723f289d08f21497bb61b59fdab9ac0",
+    integrity = "sha256-492zqRe/X6CqmhigPEjDRAeUVVr7vgb33T5qtTp8MzY=",
+    strip_prefix = "rowkeydb-build-infra-0ff50e4c46552c8b83516693fb9525532da592d6",
     urls = [
-        "https://github.com/rowkeydb-com/rowkeydb-build-infra/releases/download/v0.10.0/rowkeydb-build-infra-974eee0db723f289d08f21497bb61b59fdab9ac0.tar.gz",
+        "https://github.com/rowkeydb-com/rowkeydb-build-infra/releases/download/v0.11.0/rowkeydb-build-infra-0ff50e4c46552c8b83516693fb9525532da592d6.tar.gz",
     ],
 )
 

@@ -39,7 +39,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 readonly SCRIPT_DIR
 WORKSPACE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 readonly WORKSPACE_DIR
-readonly DOCKER_IMAGE="${CI_DOCKER_IMAGE:-ghcr.io/rowkeydb-com/rowkeydb-build-infra@sha256:c811e74114ebedf787178468c9a796e4e37ae7e55f2d2fdc63501ea940c04515}"
+readonly DOCKER_IMAGE="${CI_DOCKER_IMAGE:-ghcr.io/rowkeydb-com/rowkeydb-build-infra@sha256:a544f120db73d9634592e4b9e02e8c853333dbd22f59d376f31af515eecb8758}"
 CONTAINER_NAME="limen-ci-$$"
 readonly CONTAINER_NAME
 
