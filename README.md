@@ -209,28 +209,22 @@ shared with the other repositories built on that infrastructure; a pull
 request from a fork, which GitHub gives no secret, is built on GitHub's
 machine alone.
 
-To run the test suite locally:
+CI's build runs on this machine through CI's own script, on the working
+tree as it stands, uncommitted files included, in the pinned image with
+CI's options in CI's order; only the build metadata, which names the run
+and enters no action's key, differs. Set exactly CI's environment and add
+nothing to the command line:
 
-```
-# Release-mode test suite in Docker:
-./.github/scripts/run-bazel-in-docker.sh release test
-
-# AddressSanitizer + UndefinedBehaviorSanitizer:
-./.github/scripts/run-bazel-in-docker.sh asan-ubsan test
-
-# ThreadSanitizer:
-./.github/scripts/run-bazel-in-docker.sh tsan test
-
-# MemorySanitizer:
-./.github/scripts/run-bazel-in-docker.sh msan test
-
-# clang-tidy:
-./.github/scripts/run-bazel-in-docker.sh clang-tidy build
+```bash
+export LIMEN_EXECUTION=buildbuddy
+run=.github/scripts/run-bazel-in-docker.sh
+$run <release|asan-ubsan|tsan|msan|gazelle> test
+$run clang-tidy build
+$run coverage coverage
 ```
 
-The script pulls the image on first use. It runs the actions in the
-container, or on BuildBuddy with `LIMEN_EXECUTION=buildbuddy` and the
-key in `BUILDBUDDY_API_KEY` or `~/.config/buildbuddy/api-key`.
+The script pulls the image on first use. The BuildBuddy key is read from
+`~/.config/buildbuddy/api-key`.
 
 ### Using Limen in a downstream Bazel project
 
